@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Card dues</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<div class="shell">
+
+  <header class="masthead">
+    <div>
+      <h1>Card dues</h1>
+      <p class="sub">{{ today.strftime('%A, %d %B %Y') }}</p>
+    </div>
+    <div class="masthead-actions">
+      {% if gmail_connected %}
+        <form method="post" action="{{ url_for('run_ingest') }}">
+          <button class="btn primary" type="submit">Fetch from Gmail</button>
+        </form>
+        <form method="post" action="{{ url_for('auth_disconnect') }}">
+          <button class="btn subtle" type="submit">Disconnect Gmail</button>
+        </form>
+      {% else %}
+        <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
+      {% endif %}
+    </div>
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flashes">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% if not gmail_connected %}
+    <section class="panel setup">
+      <h2>Connect Gmail to read statements</h2>
+      {% if gmail_client_type %}
+        <p class="sub">
+          Read-only access. Statements are parsed on this machine and nothing is
+          sent anywhere.
+        </p>
+        {% if gmail_client_type == 'web' %}
+          <p class="sub">
+            Your OAuth client is a web client, so this redirect URI must be listed
+            under <em>Authorised redirect URIs</em> in Google Cloud Console:
+          </p>
+          <p><code class="copyable">{{ callback_uri }}</code></p>
+        {% endif %}
+        <p><a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a></p>
+      {% else %}
+        <p class="sub">
+          No OAuth client found. In Google Cloud Console enable the Gmail API,
+          create an OAuth client (web application) with this redirect URI:
+        </p>
+        <p><code class="copyable">{{ callback_uri }}</code></p>
+        <p class="sub">Then save the downloaded JSON as:</p>
+        <p><code class="copyable">{{ credentials_path }}</code></p>
+        <p class="sub">Reload this page once the file is in place.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+
+  <section class="summary">
+    <div class="stat">
+      <span class="stat-label">Total outstanding</span>
+      <span class="stat-value">{{ book.total_outstanding | inr }}</span>
+      <span class="stat-foot">across {{ book.views | length }} card{{ '' if book.views|length == 1 else 's' }}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Minimum to pay</span>
+      <span class="stat-value muted">{{ book.total_min_due | inr }}</span>
+      <span class="stat-foot">paying only this costs interest</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Next due</span>
+      {% if book.next_due %}
+        <span class="stat-value muted">{{ book.next_due.due_date.strftime('%d %b') }}</span>
+        <span class="stat-foot">{{ book.next_due.card.label }}</span>
+      {% else %}
+        <span class="stat-value muted">—</span>
+        <span class="stat-foot">nothing scheduled</span>
+      {% endif %}
+    </div>
+    <div class="stat">
+      <span class="stat-label">Utilisation</span>
+      <span class="stat-value muted">{{ book.utilisation ~ '%' if book.utilisation is not none else '—' }}</span>
+      <span class="stat-foot">of {{ book.total_limit | inr }} limit</span>
+    </div>
+  </section>
+
+  <p class="disclaimer">
+    These are <strong>billed statement amounts</strong>, not live balances. Anything spent after
+    the statement date is not included, and a card with no recent statement will look settled.
+  </p>
+
+  {% if not book.views %}
+    <div class="empty">
+      <h2>No cards yet</h2>
+      <p>Add a card below, then fetch statements from Gmail or type the amount in by hand.</p>
+    </div>
+  {% endif %}
+
+  <section class="cards">
+    {% for view in book.views %}
+      <article class="card status-{{ view.status }}" id="card-{{ view.card.id }}">
+        <div class="card-head">
+          <div>
+            <h2>{{ view.card.label }}</h2>
+            <p class="sub">•••• {{ view.card.last4 }}</p>
+          </div>
+          <span class="pill {{ view.status }}">{{ status_labels[view.status] }}</span>
+        </div>
+
+        <div class="amount">
+          <span class="amount-value">{{ view.outstanding | inr }}</span>
+          <span class="amount-label">
+            {% if view.paid_since_statement %}
+              outstanding after {{ view.paid_since_statement | inr }} paid
+            {% else %}
+              total due
+            {% endif %}
+          </span>
+        </div>
+
+        <dl class="facts">
+          <div>
+            <dt>Minimum due</dt>
+            <dd>{{ view.min_due_remaining | inr }}</dd>
+          </div>
+          <div>
+            <dt>Due date</dt>
+            <dd>
+              {% if view.due_date %}
+                {{ view.due_date.strftime('%d %b %Y') }}
+                <span class="days">{{ '%+d'|format(view.days_to_due) }}d</span>
+              {% else %}—{% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Statement</dt>
+            <dd>{{ view.statement_date.strftime('%d %b %Y') if view.statement_date else '—' }}</dd>
+          </div>
+          <div>
+            <dt>Limit</dt>
+            <dd>{{ view.credit_limit | inr }}</dd>
+          </div>
+        </dl>
+
+        {% if view.utilisation is not none %}
+          <div class="meter" title="{{ view.utilisation }}% of limit used">
+            <div class="meter-fill{{ ' high' if view.utilisation > 30 }}"
+                 style="width: {{ [view.utilisation, 100] | min }}%"></div>
+          </div>
+        {% endif %}
+
+        <p class="freshness{{ ' stale' if view.is_stale }}">
+          {{ view.freshness_note }}
+          {% if view.source %}<span class="badge">{{ view.source }}</span>{% endif %}
+        </p>
+
+        {% if view.history | length > 1 %}
+          <details class="months"{{ ' open' if not view.is_latest }}>
+            <summary>
+              Statements <span class="count">{{ view.history | length }}</span>
+              {% if not view.is_latest %}<span class="badge">viewing an older cycle</span>{% endif %}
+            </summary>
+            <ul>
+              {% for record in view.history %}
+                <li{{ ' class=chosen' | safe if record.id == view.record.id }}>
+                  <a href="{{ url_for('index', statement=record.id) }}#card-{{ view.card.id }}">
+                    {{ record.statement_date | dmy or 'no statement date' }}
+                  </a>
+                  <span class="figure">{{ record.total_due | inr }}</span>
+                  <span class="badge">{{ record.source }}</span>
+                </li>
+              {% endfor %}
+            </ul>
+            {% if not view.is_latest %}
+              <p class="sub">
+                <a href="{{ url_for('index') }}#card-{{ view.card.id }}">Back to the latest statement</a>
+              </p>
+            {% endif %}
+          </details>
+        {% endif %}
+
+        {% if view.transactions %}
+          <details class="txns">
+            <summary>
+              <span class="show-closed">Show transactions</span>
+              <span class="show-open">Hide transactions</span>
+              <span class="count">{{ view.transactions | length }}</span>
+            </summary>
+            <div class="scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Transaction</th>
+                    <th>Category</th>
+                    <th class="num">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for txn in view.transactions %}
+                    <tr>
+                      <td>{{ txn.txn_date | dmy or '—' }}</td>
+                      <td>{{ txn.description }}</td>
+                      <td>
+                        {% if txn.category %}
+                          {{ txn.category }}
+                          {% if txn.category_source == 'guess' %}<span class="badge">guess</span>{% endif %}
+                        {% else %}—{% endif %}
+                      </td>
+                      <td class="num{{ ' credit' if txn.is_credit }}">{{ txn.signed_amount | inr }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="3">Net of refunds and payments</td>
+                    <td class="num">{{ view.transactions_total | inr }}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </details>
+        {% endif %}
+
+        <div class="actions">
+          <details>
+            <summary>Enter / correct</summary>
+            <form method="post" action="{{ url_for('set_due', card_id=view.card.id) }}" class="grid-form">
+              <label>Total due
+                <input type="text" name="total_due" inputmode="decimal"
+                       value="{{ '%.2f'|format(view.billed_amount) if view.billed_amount is not none else '' }}" required>
+              </label>
+              <label>Minimum due
+                <input type="text" name="min_due" inputmode="decimal"
+                       value="{{ '%.2f'|format(view.min_due) if view.min_due is not none else '' }}">
+              </label>
+              <label>Due date
+                <input type="text" name="due_date" inputmode="numeric" placeholder="dd/mm/yyyy"
+                       pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}" value="{{ view.due_date | dmy }}">
+              </label>
+              <label>Statement date
+                <input type="text" name="statement_date" inputmode="numeric" placeholder="dd/mm/yyyy"
+                       pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}" value="{{ view.statement_date | dmy }}">
+              </label>
+              <label>Credit limit
+                <input type="text" name="credit_limit" inputmode="decimal"
+                       value="{{ '%.2f'|format(view.credit_limit) if view.credit_limit is not none else '' }}">
+              </label>
+              <label>Note
+                <input type="text" name="note" placeholder="optional">
+              </label>
+              <button class="btn primary" type="submit">Save</button>
+            </form>
+          </details>
+
+          <details>
+            <summary>Record payment</summary>
+            <form method="post" action="{{ url_for('record_payment', card_id=view.card.id) }}" class="grid-form">
+              <label>Amount
+                <input type="text" name="amount" inputmode="decimal"
+                       placeholder="{{ '%.2f'|format(view.outstanding) if view.outstanding else 'full amount' }}">
+              </label>
+              <label>Paid on
+                <input type="text" name="paid_on" inputmode="numeric" placeholder="dd/mm/yyyy"
+                       pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}" value="{{ today | dmy }}">
+              </label>
+              <button class="btn" type="submit">Record</button>
+            </form>
+          </details>
+
+          <form method="post" action="{{ url_for('delete_card', card_id=view.card.id) }}"
+                onsubmit="return confirm('Remove {{ view.card.label }} and its history?')">
+            <button class="btn danger" type="submit">Remove</button>
+          </form>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+
+  {% if unresolved %}
+    <section class="panel">
+      <h2>
+        Attachments that need you
+        {% if unresolved_total > unresolved | length %}
+          <span class="count">showing {{ unresolved | length }} of {{ unresolved_total }}</span>
+        {% endif %}
+      </h2>
+      {% if gmail_connected %}
+        <form method="post" action="{{ url_for('reprocess_pending') }}" class="reopen">
+          <button class="btn" type="submit">Try these again</button>
+          <span class="sub">with the card details on file now</span>
+        </form>
+      {% endif %}
+      <ul class="issues">
+        {% for item in unresolved %}
+          <li>
+            <div class="issue-head">
+              <span class="badge {{ item.status }}">{{ item.status }}</span>
+              <span class="file">{{ item.filename }}</span>
+              <span class="detail">{{ item.detail }}</span>
+            </div>
+
+            {% if item.sender or item.subject or item.received %}
+              <dl class="mail">
+                {% if item.sender %}<div><dt>From</dt><dd>{{ item.sender }}</dd></div>{% endif %}
+                {% if item.subject %}<div><dt>Subject</dt><dd>{{ item.subject }}</dd></div>{% endif %}
+                {% if item.received %}<div><dt>Received</dt><dd>{{ item.received }}</dd></div>{% endif %}
+              </dl>
+            {% endif %}
+
+            {% if item.password_rule %}
+              <p class="quoted">The mail says: “{{ item.password_rule }}”</p>
+            {% endif %}
+
+            {% if item.needs_card %}
+              {# The head detail already says no card is registered; only add the way out. #}
+              <p class="quoted">
+                Unlock it once below, or add the {{ item.issuer_name }} card with the cardholder
+                name and date of birth so future statements open on their own.
+              </p>
+            {% endif %}
+
+            {# Only a mail attachment can be retried; a local import is re-run with --password. #}
+            {% if item.can_retry %}
+              <form class="retry" method="post" action="{{ url_for('retry_locked') }}">
+                <input type="hidden" name="message_id" value="{{ item.message_id }}">
+                <input type="hidden" name="filename" value="{{ item.filename }}">
+                <input type="password" name="password" placeholder="PDF password" required>
+                <button class="btn" type="submit">Unlock</button>
+              </form>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="hint">
+        Locked statements are opened with the password rule stated in the covering mail. When that
+        rule is missing or unusual, type the password above and it is remembered for next month.
+        Anything still unreadable can be typed in with “Enter / correct”.
+      </p>
+    </section>
+  {% endif %}
+
+  <section class="panel">
+    <details {{ 'open' if not book.views }}>
+      <summary><h2>Add a card</h2></summary>
+      <form method="post" action="{{ url_for('add_card') }}" class="grid-form wide">
+        <label>Issuer
+          <select name="issuer">
+            {% for issuer in issuers %}
+              <option value="{{ issuer.key }}">{{ issuer.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>Last 4 digits
+          <input type="text" name="last4" maxlength="4" pattern="[0-9]{4}" required>
+        </label>
+        <label>Label
+          <input type="text" name="label" placeholder="HDFC Infinia">
+        </label>
+        <label>Credit limit
+          <input type="text" name="credit_limit" inputmode="decimal">
+        </label>
+        <label>Name on statement
+          <input type="text" name="name" placeholder="used to unlock PDFs">
+        </label>
+        <label>Date of birth
+          <input type="text" name="dob" inputmode="numeric" placeholder="dd/mm/yyyy"
+                 pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}">
+        </label>
+        <label>PAN
+          <input type="text" name="pan" placeholder="optional">
+        </label>
+        <label>Known PDF password
+          <input type="text" name="password" placeholder="optional">
+        </label>
+        <button class="btn primary" type="submit">Add card</button>
+      </form>
+    </details>
+  </section>
+
+  <footer>
+    <span>Everything stays on this machine. Gmail access is read-only.</span>
+    <a href="{{ url_for('api_dues') }}">JSON</a>
+  </footer>
+</div>
+</body>
+</html>
