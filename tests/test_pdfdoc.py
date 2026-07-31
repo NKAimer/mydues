@@ -1,4 +1,7 @@
+import os
+import tempfile
 from datetime import date
+from pathlib import Path
 
 import pytest
 
@@ -36,6 +39,30 @@ def test_reports_locked_when_no_candidate_works(tmp_path):
     with pytest.raises(pdfdoc.LockedPdfError) as exc:
         pdfdoc.extract(path, ["nope"])
     assert "password protected" in str(exc.value)
+
+
+def test_wrong_passwords_do_not_leave_temp_files_or_open_fds(tmp_path):
+    """Each wrong guess used to leak an mkstemp FD and orphan a temp PDF."""
+    path = tmp_path / "locked.pdf"
+    _write_pdf(path, password="nave0107")
+    guesses = [f"wrong-{index}" for index in range(80)]
+    before_temps = set(Path(tempfile.gettempdir()).glob("carddues-*.pdf"))
+    before_fds = _open_fd_count()
+
+    with pytest.raises(pdfdoc.LockedPdfError):
+        pdfdoc.extract(path, guesses)
+
+    after_temps = set(Path(tempfile.gettempdir()).glob("carddues-*.pdf"))
+    assert after_temps <= before_temps
+    # A handful of other FDs may open in the process; dozens must not.
+    assert _open_fd_count() - before_fds < 10
+
+
+def _open_fd_count() -> int:
+    try:
+        return len(os.listdir(f"/dev/fd"))
+    except OSError:
+        return len(os.listdir(f"/proc/{os.getpid()}/fd"))
 
 
 def test_candidates_cover_the_common_name_and_dob_pattern():

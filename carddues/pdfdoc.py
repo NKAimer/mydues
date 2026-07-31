@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,10 +40,22 @@ def is_encrypted(path: Path) -> bool:
 
 
 def _decrypt_to_temp(path: Path, password: str) -> Path:
-    target = Path(tempfile.mkstemp(suffix=".pdf", prefix="carddues-")[1])
+    """Write an unlocked copy. The temp file's FD from mkstemp is closed at once.
+
+    A wrong password must not create a temp file: reprocess tries hundreds of
+    candidates per attachment, and an unclosed mkstemp FD on each attempt is
+    what exhausted the process (Errno 24) when a card was added.
+    """
     with pikepdf.open(path, password=password) as pdf:
-        pdf.save(target)
-    return target
+        fd, name = tempfile.mkstemp(suffix=".pdf", prefix="carddues-")
+        os.close(fd)
+        target = Path(name)
+        try:
+            pdf.save(target)
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+        return target
 
 
 def _read(path: Path) -> tuple[str, int, list[list[list[str | None]]]]:

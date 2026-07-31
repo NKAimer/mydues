@@ -270,18 +270,23 @@ def _log(
     message: gmail.Message | None,
 ) -> None:
     """Record the outcome, filling in the mail context whenever it is at hand."""
-    db.log_ingest(
-        conn,
-        message_id=message_id,
-        filename=filename,
-        status=result.status,
-        detail=result.detail,
-        sender=message.sender if message else None,
-        subject=message.subject if message else None,
-        received_at=message.received_at if message else None,
-        issuer=message.issuer_key if message else None,
-        password_rule=passwords.stated_rule(message.body) if message else None,
-    )
+    try:
+        db.log_ingest(
+            conn,
+            message_id=message_id,
+            filename=filename,
+            status=result.status,
+            detail=result.detail,
+            sender=message.sender if message else None,
+            subject=message.subject if message else None,
+            received_at=message.received_at if message else None,
+            issuer=message.issuer_key if message else None,
+            password_rule=passwords.stated_rule(message.body) if message else None,
+        )
+    except sqlite3.Error:
+        # A full descriptor table can make SQLite fail to reopen the DB; the
+        # parse result is still useful, so the pass must keep going.
+        logger.exception("Could not record ingest status for %s", filename)
 
 
 def reprocess_pending(
