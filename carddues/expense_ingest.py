@@ -94,26 +94,64 @@ _INR = re.compile(
 # Capture merchant after common alert lead-ins; stop before dates / card boilerplate.
 _MERCHANT_PATTERNS = (
     re.compile(
+        r"(?i)(?:purchase\s+transaction(?:\s+of\s+(?:rs\.?|inr|₹)\s*[0-9,]+\.?\d*)?)"
+        r"\s+(?:at|with|towards|to)\s+"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
+    ),
+    re.compile(
+        r"(?i)(?:used\s+your\s+.+?\s+card\s+ending\s+with\s+\d+\s+for\s+a\s+)?"
+        r"purchase\s+(?:txn|transaction)\s+(?:at|with|towards|to)\s+"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
+    ),
+    re.compile(
         r"(?i)(?:spent\s+at|debited\s+(?:for|at|to)|paid\s+to|towards|"
         r"info\s*:|merchant\s*:)\s+([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
+    ),
+    re.compile(
+        r"(?i)\bUPI[_/]+([A-Za-z][A-Za-z0-9 &.'@/_-]{1,60})"
     ),
     re.compile(
         r"(?i)(?<![A-Za-z])(?:at|to)\s+([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
     ),
 )
+_VPA_RE = re.compile(
+    r"(?i)\b([A-Za-z][A-Za-z0-9._-]{2,40})@(?:oksbi|okaxis|okhdfc|okicici|ybl|"
+    r"paytm|ibl|axl|hdfcbank|icici|sbi|upi|rzp|razorpay|rxairtel)\b"
+)
 _MERCHANT_STOP = re.compile(
     r"(?i)\s+(?:using\s+your|on\s+your\s+card|on\s+\d|ref(?:erence)?(?:\s+no)?\.?|"
-    r"upi\s*:|avl\s+bal|available\s+balance|not\s+you|if\s+not|otp|a/c|account).*$"
+    r"upi\s*:|avl\s+bal|available\s+balance|not\s+you|if\s+not|otp|a/c|account|"
+    r"via\s+upi|ending\s+with|for\s+a\s+purchase).*$"
 )
 _SUBJECT_PREFIX = re.compile(
-    r"(?i)^(transaction\s+alert|txn\s+alert|debit\s+alert|card\s+transaction)\s*[:\-–]?\s*"
+    r"(?i)^(transaction\s+alert|txn\s+alert|debit\s+alert|card\s+transaction|"
+    r"upi\s+(?:payment|alert|txn|transaction))\s*[:\-–]?\s*"
 )
 _DISCLAIMER_LINE = re.compile(
     r"(?i)\b(?:otp|do\s+not\s+share|confidential|unsubscribe|click\s+here|"
-    r"terms\s+and\s+conditions|ignore\s+this)\b"
+    r"terms\s+and\s+conditions|ignore\s+this|dear\s+customer|greetings\s+from)\b"
 )
 _DATE_INLINE = re.compile(
     r"\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b"
+)
+_BAD_MERCHANT = re.compile(
+    r"(?i)\b(?:"
+    r"confirm\s+that\s+your"
+    r"|credit\s+card\s+no\s+ending"
+    r"|card\s+no\s+ending\s+with"
+    r"|primary\s+card\s+holder"
+    r"|visa\s+infinite"
+    r"|everyday\s+cashback"
+    r"|dear\s+customer"
+    r"|greetings\s+from"
+    r"|world\s+of\s+visa"
+    r"|account\s+opening"
+    r"|auto\s+repay"
+    r"|transaction\s+alert"
+    r"|txn\s+alert"
+    r"|not\s+you"
+    r"|if\s+not\s+you"
+    r")\b"
 )
 _NOTE_MAX = 160
 _DESC_MAX = 80
@@ -130,6 +168,15 @@ _MERCHANT_STOPWORDS = frozenset(
         "bank",
         "payment",
         "transaction",
+        "purchase",
+        "date",
+        "customer",
+        "hdfc",
+        "icici",
+        "sbi",
+        "axis",
+        "yes",
+        "hsbc",
     }
 )
 
@@ -159,47 +206,93 @@ def _strip_html(text: str) -> str:
     return unescape(re.sub(r"\s+", " ", plain)).strip()
 
 
+def _is_bad_merchant(text: str) -> bool:
+    """True when text is bank boilerplate / marketing, not a merchant name."""
+    value = (text or "").strip()
+    if not value or len(value) < 2:
+        return True
+    if _BAD_MERCHANT.search(value):
+        return True
+    lowered = value.lower()
+    if lowered in _MERCHANT_STOPWORDS:
+        return True
+    if re.fullmatch(r"[\d.,\s₹rsinr]+", lowered):
+        return True
+    # Subjects that are only "Rs. 99 spent" style with no merchant.
+    if re.fullmatch(
+        r"(?i)(?:rs\.?|inr|₹)?\s*[\d,]+\.?\d*\s*(?:spent|debited|paid)?",
+        value.strip(),
+    ):
+        return True
+    return False
+
+
 def _clean_merchant(raw: str) -> str | None:
     value = _MERCHANT_STOP.sub("", raw)
     value = re.split(r"\s{2,}|\n|(?:Rs\.?|INR|₹)\s*\d", value, maxsplit=1)[0]
-    value = value.strip(" .,;:|-")
+    value = value.strip(" .,;:|-_")
+    # Drop trailing "Date" from mangled VPA lines.
+    value = re.sub(r"(?i)\s+date$", "", value).strip()
     if not value or len(value) < 2:
+        return None
+    if _is_bad_merchant(value):
         return None
     if value.lower() in _MERCHANT_STOPWORDS:
         return None
     if re.fullmatch(r"[\d.,]+", value):
         return None
-    if value.lower() in {"rs", "inr"}:
-        return None
     return value[:_DESC_MAX]
 
 
+def _vpa_merchant(blob: str) -> str | None:
+    """Readable brand-ish local-part from a UPI VPA when body has no better hit."""
+    for match in _VPA_RE.finditer(blob):
+        local = match.group(1)
+        # uber1.rzp / uberindiasystem187204.rzp → uber / uberindiasystem…
+        head = re.split(r"[._]", local, maxsplit=1)[0]
+        head = re.sub(r"\d+$", "", head)
+        if len(head) < 3:
+            continue
+        cleaned = _clean_merchant(head)
+        if cleaned:
+            return cleaned
+    return None
+
+
 def _extract_merchant(blob: str) -> str | None:
+    """Best non-boilerplate merchant string found in subject+body."""
     for pattern in _MERCHANT_PATTERNS:
         for match in pattern.finditer(blob):
             merchant = _clean_merchant(match.group(1))
             if merchant:
                 return merchant
-    return None
+    return _vpa_merchant(blob)
 
 
-def _clean_subject(subject: str) -> str:
+def _clean_subject(subject: str) -> str | None:
     cleaned = _SUBJECT_PREFIX.sub("", subject.strip())
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" .:;-")
-    return (cleaned or subject.strip())[:_DESC_MAX] or "Gmail alert"
+    cleaned = (cleaned or "").strip()[:_DESC_MAX]
+    if not cleaned or _is_bad_merchant(cleaned):
+        return None
+    return cleaned
 
 
 def _short_note(*, subject: str, body_plain: str, description: str) -> str | None:
     """One cleaned audit line; never the full email body."""
     parts: list[str] = []
     subj = re.sub(r"\s+", " ", subject).strip()
-    if subj:
+    if subj and not _is_bad_merchant(subj):
         parts.append(subj)
+    elif subj:
+        parts.append(subj[:_NOTE_MAX])
     for chunk in re.split(r"[.!?]\s+|\n+", body_plain):
         line = re.sub(r"\s+", " ", chunk).strip()
         if not line or _DISCLAIMER_LINE.search(line):
             continue
         if line.lower() == subj.lower():
+            continue
+        if _is_bad_merchant(line) and "purchase" not in line.lower():
             continue
         parts.append(line)
         break
@@ -251,6 +344,11 @@ def parse_alert_email(
             "sent via",
         )
     )
+    # Bodies that clearly describe a card purchase even when subject is vague.
+    if not debitish and re.search(
+        r"(?i)\b(?:purchase\s+transaction|spent\s+at|paid\s+to|debited)\b", body_plain
+    ):
+        debitish = True
     if creditish and not debitish:
         return None
 
@@ -271,9 +369,9 @@ def parse_alert_email(
         spent_on = date.today()
 
     merchant = _extract_merchant(blob)
-    description = merchant or _clean_subject(subject)
+    description = merchant or _clean_subject(subject) or "Gmail alert"
     note = _short_note(subject=subject, body_plain=body_plain, description=description)
-    category, _source = resolve_category(description, note=note, conn=None)
+    category, source = resolve_category(description, note=note, conn=None)
 
     return Expense(
         spent_on=spent_on,
@@ -281,8 +379,116 @@ def parse_alert_email(
         description=description,
         source=SOURCE_GMAIL,
         category=category,
+        category_source=source,
         note=note,
     )
+
+
+@dataclass
+class ExpenseRefreshSummary:
+    updated: int = 0
+    skipped: int = 0
+    failed: int = 0
+
+
+def refresh_expense_from_gmail(
+    conn,
+    expense: Expense,
+    *,
+    service=None,
+    interactive: bool = False,
+) -> bool:
+    """Re-fetch the Gmail alert and refresh description/note/(category).
+
+    Manual ``user`` categories are preserved; description and note still update.
+    Returns True when the row changed.
+    """
+    from .models import CATEGORY_USER
+
+    if expense.id is None or expense.source != SOURCE_GMAIL or not expense.source_ref:
+        return False
+    if service is None:
+        service = gmail.service(interactive=interactive)
+    message = gmail.get_message(service, expense.source_ref)
+    received_at = message.received_at
+    if received_at is None and expense.spent_on is not None:
+        received_at = datetime.combine(expense.spent_on, datetime.min.time())
+    parsed = parse_alert_email(
+        subject=message.subject or "",
+        body=message.body or "",
+        received_at=received_at,
+    )
+    if parsed is None:
+        return False
+
+    description = parsed.description
+    note = parsed.note
+    if expense.category_source == CATEGORY_USER:
+        category = expense.category
+        category_source = CATEGORY_USER
+    else:
+        category, category_source = resolve_category(
+            description, note=note, conn=conn
+        )
+
+    if (
+        description == expense.description
+        and note == expense.note
+        and category == expense.category
+        and category_source == expense.category_source
+    ):
+        return False
+
+    return db.update_expense(
+        conn,
+        expense.id,
+        spent_on=expense.spent_on,
+        amount=expense.amount,
+        description=description,
+        category=category,
+        category_source=category_source,
+        note=note,
+    )
+
+
+def refresh_gmail_expenses(
+    conn,
+    *,
+    interactive: bool = False,
+    only_bad: bool = True,
+) -> ExpenseRefreshSummary:
+    """Re-parse Gmail-sourced expenses from their original messages."""
+    summary = ExpenseRefreshSummary()
+    if not gmail.is_connected():
+        return summary
+    service = gmail.service(interactive=interactive)
+    rows = conn.execute(
+        "SELECT * FROM expenses WHERE source = ? AND source_ref IS NOT NULL",
+        (SOURCE_GMAIL,),
+    ).fetchall()
+    for row in rows:
+        expense = db.get_expense(conn, int(row["id"]))
+        if expense is None:
+            continue
+        if only_bad and not _is_bad_merchant(expense.description):
+            # Still refresh when category is blank — description may be ok but weak.
+            if expense.category:
+                summary.skipped += 1
+                continue
+        try:
+            changed = refresh_expense_from_gmail(
+                conn, expense, service=service, interactive=False
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("Refresh failed for expense %s", expense.id)
+            summary.failed += 1
+            continue
+        if changed:
+            summary.updated += 1
+        else:
+            summary.skipped += 1
+    return summary
+
 
 
 def ingest_expense_alerts(
@@ -331,10 +537,11 @@ def ingest_expense_alerts(
             )
             continue
 
-        category, _source = resolve_category(
+        category, source = resolve_category(
             expense.description, note=expense.note, conn=conn
         )
         expense.category = category
+        expense.category_source = source
 
         expense.source_ref = message_id
         expense_id = db.add_expense(conn, expense)

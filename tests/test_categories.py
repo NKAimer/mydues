@@ -7,6 +7,7 @@ import pytest
 from carddues.categories import (
     CATEGORY_MEMORY,
     UNCATEGORIZED,
+    apply_category_rules,
     categorise,
     category_spend_totals,
     lookup_merchant_category,
@@ -22,6 +23,7 @@ from carddues.models import (
     KIND_DEBIT,
     Card,
     Expense,
+    SOURCE_MANUAL,
     SOURCE_STATEMENT,
     StatementRecord,
     Transaction,
@@ -67,6 +69,64 @@ def test_memory_overrides_keywords(conn):
     category, source = resolve_category("SWIGGY BANGALORE", conn=conn)
     assert category == "Travel"
     assert source == CATEGORY_MEMORY
+
+
+def test_memory_fuzzy_match_pharmacies_to_pharmacy(conn):
+    remember_merchant_category(conn, "Apollo pharmacies", "Health")
+    category, source = resolve_category("APOLLO PHARMACY #12 MUMBAI", conn=conn)
+    assert category == "Health"
+    assert source == CATEGORY_MEMORY
+
+
+def test_memory_fuzzy_match_exact_still_works(conn):
+    remember_merchant_category(conn, "SWIGGY BANGALORE", "Travel")
+    assert lookup_merchant_category(conn, "SWIGGY BANGALORE") == "Travel"
+    category, source = resolve_category("SWIGGY BANGALORE", conn=conn)
+    assert category == "Travel"
+    assert source == CATEGORY_MEMORY
+
+
+def test_memory_longest_key_wins(conn):
+    remember_merchant_category(conn, "apollo", "Health")
+    remember_merchant_category(conn, "apollo pharmacy", "Shopping")
+    assert lookup_merchant_category(conn, "APOLLO PHARMACY BANGALORE") == "Shopping"
+
+
+def test_apply_category_rules_uses_fuzzy_merchant_memory(conn):
+    card = Card(issuer="hdfc", label="HDFC Infinia", last4="8765")
+    card.id = db.add_card(conn, card)
+    statement_id = db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=card.id,
+            total_due=500.0,
+            as_of=datetime.now(),
+            source=SOURCE_STATEMENT,
+            statement_date=date(2026, 7, 15),
+        ),
+    )
+    db.save_transactions(
+        conn,
+        card.id,
+        statement_id,
+        [
+            Transaction(
+                description="APOLLO PHARMACY BANGALORE",
+                amount=99.0,
+                kind=KIND_DEBIT,
+                category="Health",
+                category_source=CATEGORY_GUESS,
+            ),
+        ],
+    )
+    # Keyword guess would keep Health; force a different category via memory.
+    remember_merchant_category(conn, "Apollo pharmacies", "Shopping")
+    stats = apply_category_rules(conn)
+    assert stats["transactions_updated"] == 1
+
+    txn = db.transactions_for_statement(conn, statement_id)[0]
+    assert txn.category == "Shopping"
+    assert txn.category_source == CATEGORY_MEMORY
 
 
 def test_memory_for_unknown_merchant(conn):
@@ -153,6 +213,11 @@ def test_edit_transaction_category_sets_user_source_and_memory(client, conn):
     )
     txn = db.transactions_for_statement(conn, statement_id)[0]
     assert txn.id is not None
+
+    page = client.get("/").get_data(as_text=True)
+    assert 'id="known-categories"' in page
+    assert 'list="known-categories"' in page
+    assert "Food &amp; dining" in page or "Food & dining" in page
 
     response = client.post(
         f"/transactions/{txn.id}/category",
@@ -454,16 +519,277 @@ def test_categories_tab_merchant_crud(client, conn):
 
     response = client.post(
         f"/merchant-categories/{key}/edit",
-        data={"category": "Health"},
+        data={"merchant": key, "category": "Health"},
         follow_redirects=False,
     )
     assert response.status_code == 302
     assert db.list_merchant_categories(conn)[0]["category"] == "Health"
 
     response = client.post(
-        f"/merchant-categories/{key}/delete",
+        f"/merchant-categories/{key}/edit",
+        data={"merchant": "apollo pharmacies", "category": "Health"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 302
+    rows = db.list_merchant_categories(conn)
+    assert len(rows) == 1
+    assert rows[0]["merchant_key"] == "apollo pharmacies"
+    assert rows[0]["category"] == "Health"
+
+    response = client.post(
+        f"/merchant-categories/apollo pharmacies/delete",
         follow_redirects=False,
     )
     assert response.status_code == 302
     assert db.list_merchant_categories(conn) == []
 
+
+def test_apply_category_rules_updates_eligible_expenses(conn):
+    blank_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=10.0,
+            description="SUNRISE TRADERS",
+            category=None,
+            category_source=None,
+            source=SOURCE_MANUAL,
+        ),
+    )
+    guess_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 2),
+            amount=20.0,
+            description="SUNRISE MART",
+            category="Misc",
+            category_source=CATEGORY_GUESS,
+            source=SOURCE_MANUAL,
+        ),
+    )
+    user_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 3),
+            amount=30.0,
+            description="SUNRISE CAFE",
+            category="Travel",
+            category_source=CATEGORY_USER,
+            source=SOURCE_MANUAL,
+        ),
+    )
+    assert blank_id and guess_id and user_id
+
+    db.upsert_category_phrase(conn, "sunrise", "Shopping")
+    stats = apply_category_rules(conn)
+    assert stats["expenses_updated"] == 2
+    assert stats["transactions_updated"] == 0
+
+    assert db.get_expense(conn, blank_id).category == "Shopping"
+    assert db.get_expense(conn, blank_id).category_source == CATEGORY_GUESS
+    assert db.get_expense(conn, guess_id).category == "Shopping"
+    assert db.get_expense(conn, guess_id).category_source == CATEGORY_GUESS
+    assert db.get_expense(conn, user_id).category == "Travel"
+    assert db.get_expense(conn, user_id).category_source == CATEGORY_USER
+
+
+def test_apply_category_rules_skips_statement_and_user_txns(conn):
+    card = Card(issuer="hdfc", label="HDFC Infinia", last4="8765")
+    card.id = db.add_card(conn, card)
+    statement_id = db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=card.id,
+            total_due=500.0,
+            as_of=datetime.now(),
+            source=SOURCE_STATEMENT,
+            statement_date=date(2026, 7, 15),
+        ),
+    )
+    db.save_transactions(
+        conn,
+        card.id,
+        statement_id,
+        [
+            Transaction(
+                description="SUNRISE TRADERS",
+                amount=99.0,
+                kind=KIND_DEBIT,
+                category=None,
+                category_source=CATEGORY_GUESS,
+            ),
+            Transaction(
+                description="ZOMATO ORDER",
+                amount=200.0,
+                kind=KIND_DEBIT,
+                category="Food & Beverages",
+                category_source=CATEGORY_STATEMENT,
+            ),
+            Transaction(
+                description="SUNRISE CAFE",
+                amount=50.0,
+                kind=KIND_DEBIT,
+                category="Travel",
+                category_source=CATEGORY_USER,
+            ),
+        ],
+    )
+    db.upsert_category_phrase(conn, "sunrise", "Shopping")
+    stats = apply_category_rules(conn)
+    assert stats["transactions_updated"] == 1
+
+    by_desc = {
+        row.description: row for row in db.transactions_for_statement(conn, statement_id)
+    }
+    assert by_desc["SUNRISE TRADERS"].category == "Shopping"
+    assert by_desc["SUNRISE TRADERS"].category_source == CATEGORY_GUESS
+    # Phrase rules must not overwrite issuer-printed categories.
+    assert by_desc["ZOMATO ORDER"].category == "Food & Beverages"
+    assert by_desc["ZOMATO ORDER"].category_source == CATEGORY_STATEMENT
+    assert by_desc["SUNRISE CAFE"].category == "Travel"
+    assert by_desc["SUNRISE CAFE"].category_source == CATEGORY_USER
+
+
+def test_apply_category_rules_memory_overrides_statement_category(conn):
+    """Learned merchants can correct noisy issuer labels like Miscellaneous Stores."""
+    card = Card(issuer="hdfc", label="HDFC Infinia", last4="8765")
+    card.id = db.add_card(conn, card)
+    statement_id = db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=card.id,
+            total_due=500.0,
+            as_of=datetime.now(),
+            source=SOURCE_STATEMENT,
+            statement_date=date(2026, 7, 15),
+        ),
+    )
+    db.save_transactions(
+        conn,
+        card.id,
+        statement_id,
+        [
+            Transaction(
+                description="UPI_APOLLO PHARMACY IND - Ref No: RT123",
+                amount=433.0,
+                kind=KIND_DEBIT,
+                category="Miscellaneous Stores",
+                category_source=CATEGORY_STATEMENT,
+            ),
+        ],
+    )
+    remember_merchant_category(conn, "apollo pharmacy", "Health")
+    stats = apply_category_rules(conn)
+    assert stats["transactions_updated"] == 1
+    txn = db.transactions_for_statement(conn, statement_id)[0]
+    assert txn.category == "Health"
+    assert txn.category_source == CATEGORY_MEMORY
+
+
+def test_delete_phrase_reapply_clears_previous_guess(conn):
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=10.0,
+            description="OBSCURE SUNRISE SHOP",
+            category=None,
+            category_source=None,
+            source=SOURCE_MANUAL,
+        ),
+    )
+    phrase_id = db.upsert_category_phrase(conn, "sunrise", "Shopping")
+    apply_category_rules(conn)
+    assert db.get_expense(conn, expense_id).category == "Shopping"
+    assert db.get_expense(conn, expense_id).category_source == CATEGORY_GUESS
+
+    assert db.delete_category_phrase(conn, phrase_id)
+    stats = apply_category_rules(conn)
+    assert stats["expenses_updated"] == 1
+    cleared = db.get_expense(conn, expense_id)
+    assert cleared.category is None
+    assert cleared.category_source is None
+
+
+def test_phrase_crud_reapplies_and_reapply_route(client, conn):
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=10.0,
+            description="SUNRISE TRADERS",
+            category=None,
+            category_source=None,
+            source=SOURCE_MANUAL,
+        ),
+    )
+    response = client.post(
+        "/category-phrases",
+        data={"phrase": "sunrise", "category": "Shopping"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Re-applied rules" in body
+    assert db.get_expense(conn, expense_id).category == "Shopping"
+
+    page = client.get("/?tab=categories").get_data(as_text=True)
+    assert "Re-apply category rules" in page
+    assert "Manual edits are left alone" in page or "manual" in page.lower()
+
+    db.update_expense(
+        conn,
+        expense_id,
+        spent_on=date(2026, 8, 1),
+        amount=10.0,
+        description="SUNRISE TRADERS",
+        category="Misc",
+        category_source=CATEGORY_GUESS,
+    )
+    db.upsert_category_phrase(conn, "sunrise", "Travel")
+    response = client.post("/categories/reapply", follow_redirects=True)
+    assert response.status_code == 200
+    assert "Re-applied rules" in response.get_data(as_text=True)
+    assert db.get_expense(conn, expense_id).category == "Travel"
+    assert db.get_expense(conn, expense_id).category_source == CATEGORY_GUESS
+
+
+def test_manual_expense_sets_user_category_source(client, conn):
+    client.post(
+        "/expenses",
+        data={
+            "spent_on": "01/08/2026",
+            "amount": "50",
+            "description": "Coffee",
+            "category": "Food & dining",
+        },
+    )
+    rows = db.list_expenses(conn, start=date(2026, 8, 1), end=date(2026, 9, 1))
+    assert len(rows) == 1
+    assert rows[0].category == "Food & dining"
+    assert rows[0].category_source == CATEGORY_USER
+
+    expense_id = rows[0].id
+    client.post(
+        f"/expenses/{expense_id}/edit",
+        data={
+            "spent_on": "01/08/2026",
+            "amount": "50",
+            "description": "Coffee",
+            "category": "",
+        },
+    )
+    cleared = db.get_expense(conn, expense_id)
+    assert cleared.category is None
+    assert cleared.category_source is None
+
+
+def test_parse_alert_sets_category_source():
+    expense = expense_ingest.parse_alert_email(
+        subject="Transaction Alert: INR 420.00 spent",
+        body="Rs. 420.00 spent at SWIGGY BANGALORE on 01-08-2026 using your card.",
+        received_at=datetime(2026, 8, 1, 12, 0),
+    )
+    assert expense is not None
+    assert expense.category == "Food & dining"
+    assert expense.category_source == CATEGORY_GUESS

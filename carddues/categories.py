@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Iterable
 
-from .models import CATEGORY_GUESS, CATEGORY_STATEMENT
+from .models import CATEGORY_GUESS, CATEGORY_STATEMENT, CATEGORY_USER
 
 UNCATEGORIZED = "Uncategorized"
 
@@ -200,12 +200,39 @@ CATEGORY_KEYWORDS["Cash & transfers"] = CATEGORY_KEYWORDS["Cash & transfers"] + 
 _LETTERS = re.compile(r"[A-Za-z]{2,}")
 CATEGORY_MEMORY = "memory"
 
+# Sources that may be overwritten when phrase/merchant rules change.
+_REAPPLY_SOURCES = frozenset({None, CATEGORY_GUESS, CATEGORY_MEMORY})
+
 
 def merchant_key(description: str) -> str:
     """Stable key for remembering a category against a merchant string."""
     text = re.sub(r"[^a-z0-9]+", " ", (description or "").lower()).strip()
     text = re.sub(r"\s+", " ", text)
     return text[:48]
+
+
+def _stem_token(token: str) -> str:
+    """Light plural stemming so pharmacies ↔ pharmacy."""
+    if len(token) > 3 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 3 and token.endswith("es"):
+        return token[:-2]
+    if len(token) > 2 and token.endswith("s"):
+        return token[:-1]
+    return token
+
+
+def _stemmed_tokens(key: str) -> set[str]:
+    return {_stem_token(part) for part in key.split() if part}
+
+
+def _merchant_key_matches(stored: str, description_key: str) -> bool:
+    if stored in description_key or description_key in stored:
+        return True
+    stored_tokens = _stemmed_tokens(stored)
+    if not stored_tokens:
+        return False
+    return stored_tokens <= _stemmed_tokens(description_key)
 
 
 def categorise(
@@ -243,7 +270,21 @@ def lookup_merchant_category(conn: sqlite3.Connection, description: str) -> str 
     row = conn.execute(
         "SELECT category FROM merchant_categories WHERE merchant_key = ?", (key,)
     ).fetchone()
-    return row["category"] if row else None
+    if row:
+        return row["category"]
+
+    best_key = ""
+    best_category: str | None = None
+    for stored in conn.execute(
+        "SELECT merchant_key, category FROM merchant_categories"
+    ).fetchall():
+        stored_key = stored["merchant_key"] or ""
+        if not stored_key or not _merchant_key_matches(stored_key, key):
+            continue
+        if len(stored_key) > len(best_key):
+            best_key = stored_key
+            best_category = stored["category"]
+    return best_category
 
 
 def remember_merchant_category(
@@ -323,3 +364,63 @@ def resolve_category(
         blob = f"{blob} {note}".strip()
     guess = categorise(blob, phrases=phrases)
     return (guess, CATEGORY_GUESS) if guess else (None, None)
+
+
+def _may_reapply(old_source: str | None, new_source: str | None) -> bool:
+    """Whether bulk re-apply may overwrite this row's category.
+
+    Manual ``user`` edits are never touched. Issuer-printed ``statement``
+    categories stay put unless a learned merchant (``memory``) matches — that
+    is how users correct noisy bank labels like "Miscellaneous Stores".
+    """
+    if old_source == CATEGORY_USER:
+        return False
+    if old_source == CATEGORY_STATEMENT:
+        return new_source == CATEGORY_MEMORY
+    return old_source in _REAPPLY_SOURCES
+
+
+def apply_category_rules(conn: sqlite3.Connection) -> dict[str, int]:
+    """Re-resolve blank/auto categories on expenses and statement transactions.
+
+    Skips manual ``user`` edits. Issuer-printed ``statement`` rows are only
+    updated when a learned merchant matches. Does not teach merchant memory.
+    Returns counts of rows whose category or source changed.
+    """
+    expenses_updated = 0
+    for row in conn.execute(
+        "SELECT id, description, note, category, category_source FROM expenses"
+    ).fetchall():
+        category, source = resolve_category(
+            row["description"], note=row["note"], conn=conn
+        )
+        if not _may_reapply(row["category_source"], source):
+            continue
+        if category == row["category"] and source == row["category_source"]:
+            continue
+        conn.execute(
+            "UPDATE expenses SET category = ?, category_source = ? WHERE id = ?",
+            (category, source, row["id"]),
+        )
+        expenses_updated += 1
+
+    transactions_updated = 0
+    for row in conn.execute(
+        "SELECT id, description, category, category_source FROM transactions"
+    ).fetchall():
+        category, source = resolve_category(row["description"], conn=conn)
+        if not _may_reapply(row["category_source"], source):
+            continue
+        if category == row["category"] and source == row["category_source"]:
+            continue
+        conn.execute(
+            "UPDATE transactions SET category = ?, category_source = ? WHERE id = ?",
+            (category, source, row["id"]),
+        )
+        transactions_updated += 1
+
+    conn.commit()
+    return {
+        "expenses_updated": expenses_updated,
+        "transactions_updated": transactions_updated,
+    }

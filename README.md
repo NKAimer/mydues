@@ -4,8 +4,9 @@ Track what you owe on your Indian credit cards, in one place, on your own machin
 
 It reads statement emails from Gmail (read-only), unlocks the password-protected
 PDFs, extracts the total due, minimum due, payment due date and the individual
-transactions per card, and shows them in a local dashboard. Anything it cannot
-read, you type in yourself. Dates are written and read as dd/mm/yyyy throughout.
+transactions per card, and shows them in a local dashboard. A separate Expenses
+tab pulls bank / UPI spend-alert emails into a monthly ledger. Anything it cannot
+read, you type in yourself. Dates are written and read as **dd/mm/yyyy** throughout.
 
 ![The card-dues dashboard](docs/screenshot.png)
 
@@ -30,15 +31,52 @@ There is no way around this for a personal project:
 The data model uses ReBIT's field names so a BBPS or AA source can be added later
 as just another `source` alongside `statement` and `manual`.
 
+## Prerequisites
+
+- **Python 3.11+** (see `requires-python` in `pyproject.toml`)
+- A Gmail account that receives your card statements (and optionally spend alerts)
+- A Google Cloud project with the **Gmail API** enabled and an OAuth client
+  (setup below)
+- macOS is the primary target for `carddues notify` and the LaunchAgent script;
+  the web app and CLI work on any OS that can run Python
+
+Optional: [uv](https://docs.astral.sh/uv/) if you prefer lockfile-based installs
+(`uv.lock` is in the repo).
+
 ## Setup
 
+Clone the repo, then install dependencies and initialise the local database.
+
+### With pip / venv
+
 ```bash
+git clone <repo-url> card-dues
+cd card-dues
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e .
 .venv/bin/python -m carddues init
 ```
 
-Optionally install the `carddues` command: `.venv/bin/pip install -e .`
+### With uv
+
+```bash
+git clone <repo-url> card-dues
+cd card-dues
+uv sync
+uv run carddues init
+```
+
+`init` creates `~/.carddues/` (mode `0700`) with an empty SQLite database and an
+attachments directory. After an editable install, the `carddues` command is on
+your PATH inside the venv; otherwise use `.venv/bin/python -m carddues …`.
+
+For development / tests, also install:
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+# or: uv sync --extra dev
+```
 
 ### Connect Gmail
 
@@ -46,7 +84,8 @@ Optionally install the `carddues` command: `.venv/bin/pip install -e .`
    and enable the **Gmail API**.
 2. On the OAuth consent screen, choose **External**, and add your own Gmail
    address under **Test users**. The app stays unverified, which is fine for one
-   user.
+   user. (While the consent screen is in **Testing**, refresh tokens expire about
+   every 7 days — see [docs/gmail-oauth.md](docs/gmail-oauth.md).)
 3. Create an OAuth client. Either type works:
    - **Desktop app** — nothing else to configure. Google allows the loopback
      redirect this app uses.
@@ -56,10 +95,15 @@ Optionally install the `carddues` command: `.venv/bin/pip install -e .`
      http://127.0.0.1:8765/oauth/callback
      ```
 
-4. Download the JSON and save it as `~/.carddues/credentials.json`.
-5. Start the dashboard (`.venv/bin/python -m carddues serve`) and click
-   **Connect Gmail**. Google's consent screen opens, and the redirect back
-   finishes the connection — no terminal step.
+4. Download the JSON and save it as `~/.carddues/credentials.json`
+   (or set `CARDDUES_CREDENTIALS` to another path).
+5. Start the dashboard and click **Connect Gmail**. Google's consent screen opens,
+   and the redirect back finishes the connection — no terminal step.
+
+```bash
+.venv/bin/python -m carddues serve
+# open http://127.0.0.1:8765
+```
 
 If you serve on a different port, the dashboard prints the exact redirect URI to
 register. A desktop client can also be authorised from the terminal with
@@ -71,16 +115,90 @@ with owner-only permissions. **Disconnect Gmail** on the dashboard forgets that
 token; to revoke the grant itself, remove the app from your
 [Google account permissions](https://myaccount.google.com/permissions).
 
-## Use
+Token expiry and moving the consent screen to Production are covered in
+[docs/gmail-oauth.md](docs/gmail-oauth.md). Restarting a stuck dashboard is covered
+in [RESTART.md](RESTART.md).
+
+## Configuration
+
+| Variable / path | Purpose |
+|-----------------|--------|
+| `CARDDUES_HOME` | Data directory (default `~/.carddues`) |
+| `CARDDUES_CREDENTIALS` | Path to Google OAuth client JSON (default `$CARDDUES_HOME/credentials.json`) |
+| `$CARDDUES_HOME/carddues.db` | SQLite database (cards, statements, transactions, expenses, categories) |
+| `$CARDDUES_HOME/credentials.json` | OAuth client downloaded from Google Cloud |
+| `$CARDDUES_HOME/token.json` | Access + refresh tokens after Connect Gmail |
+| `$CARDDUES_HOME/attachments/` | Downloaded statement PDFs (usually deleted after parse) |
+| `$CARDDUES_HOME/session_secret` | Flask session key (auto-created, mode `0600`) |
+
+Nothing is sent anywhere except Google's OAuth and Gmail APIs for mail you already
+own. This project never asks for net banking credentials and does no screen scraping.
+
+Tunables in code (not env vars): statement lookback defaults to **400 days**;
+expense-alert lookback defaults to **90 days**; a statement older than **40 days**
+is treated as stale.
+
+## Dashboard
+
+```bash
+carddues serve                  # http://127.0.0.1:8765
+carddues serve --port 8766      # different port → update OAuth redirect URI
+carddues serve --debug          # auto-reload while developing (local only)
+```
+
+Three tabs:
+
+### Credit cards
+
+- Portfolio summary: total outstanding, minimum to pay, next due, utilisation
+- **Billed in Month** — sum of each statement's `total_due` whose
+  **`statement_date`** falls in that month (not calendar-day purchase debits).
+  Purchases on a July bill can have June `txn_date`s; those still belong to the
+  July billed total. Month navigation is Prev / Next.
+- Per-card breakdown of that month's billed totals, plus category totals from
+  the line items on those statements
+- Per card: latest statement (or an older cycle from **Statements**), payments,
+  manual override, unlock for locked PDFs, show transactions
+- **Fetch from Gmail** / **Re-parse statements** when connected
+
+### Expenses
+
+Separate from statement PDFs so dues Fetch never double-counts alert mail.
+
+- Monthly ledger of amounts from bank / UPI **transaction alert** emails
+  (subject hints such as “transaction alert”, “debited”, “UPI”, …; statement
+  and loan-offer subjects are skipped)
+- **Fetch expense alerts** (default lookback 90 days) and **Refresh descriptions
+  from Gmail**
+- Add / edit / delete expenses by hand; **Show email** for Gmail-sourced rows
+- Totals and category breakdown for the selected calendar month (`spent_on`)
+
+### Categories
+
+Shared rules for statement line items and the expenses ledger.
+
+- Resolution order: issuer-printed category → learned merchant → phrase /
+  keyword rules
+- Edit phrase rules and merchant memory; **Re-apply category rules** updates
+  blank and auto-categorised rows (manual edits stay put; issuer labels only
+  change when a learned merchant matches)
+
+## CLI workflows
+
+After `pip install -e .` (or `uv sync`), use `carddues`. Otherwise prefix with
+`.venv/bin/python -m carddues`.
 
 ```bash
 # Register a card. Name and date of birth are used to derive PDF passwords.
 # Adding a card also retries the statements still waiting to be opened.
 carddues cards add --issuer hdfc --last4 8765 --label "HDFC Infinia" \
                    --limit 500000 --name "Naveen Kumar" --dob 01/07/1990
+carddues cards list
+carddues cards remove 8765
 
 # Fetch and parse statements from Gmail
 carddues ingest --show
+carddues ingest --days 120 --limit 50 --keep-files
 
 # Or parse a PDF you already have
 carddues import ~/Downloads/statement.pdf --password mypassword
@@ -94,7 +212,7 @@ carddues paid 8765 --amount 20000
 # Open a statement that stayed locked; the password is kept for next month
 carddues unlock 'NAVE1504' --file statement.pdf
 
-# Work through the backlog of waiting attachments, a batch at a time
+# Work through the backlog of waiting attachments, a batch at a time (40 default)
 carddues reprocess --issuer hdfc
 
 # Re-read already-parsed PDFs after a parser fix (Fetch skips those)
@@ -103,18 +221,25 @@ carddues reparse --issuer icici
 carddues show          # table in the terminal
 carddues show --json   # machine readable
 carddues log           # what the last ingest did with each attachment
+carddues audit         # weak / incomplete parses across cards
 
 carddues serve         # dashboard on http://127.0.0.1:8765
 ```
 
+Supported `--issuer` keys include: `hdfc`, `icici`, `sbicard`, `axis`, `kotak`,
+`idfcfirst`, `amex`, `hsbc`, `indusind`, `rbl`, `yesbank`, `au`, `federal`,
+`onecard`, and `other`. Unknown mail still falls through to a generic parser.
+
 ### Daily refresh and notifications
 
-`carddues notify` sends a macOS notification when a card is overdue or due within
-three days. To run it every morning, edit the path in
-`scripts/com.carddues.refresh.plist` and load it:
+`carddues notify` sends a **macOS** notification when a card is overdue or due
+within three days. To run ingest + notify every morning, edit the path in
+`scripts/com.carddues.refresh.plist` (replace `REPLACE_WITH_PROJECT_PATH`) and
+load it:
 
 ```bash
 cp scripts/com.carddues.refresh.plist ~/Library/LaunchAgents/
+# edit REPLACE_WITH_PROJECT_PATH in the copied file
 launchctl load ~/Library/LaunchAgents/com.carddues.refresh.plist
 ```
 
@@ -136,8 +261,8 @@ column included. The rest print one transaction per line, opening with a date an
 closing with an amount, which is what separates a transaction from the summary
 rows above it — a trailing reward-points column or a second posting date does not
 confuse it. Most Indian statements print no category at all, so the merchant name
-is matched against a keyword list and the result is marked **guess** in the table
-to keep it apart from a category the issuer itself printed.
+is matched against phrase / keyword rules and the result is marked **guess** in
+the table to keep it apart from a category the issuer itself printed.
 
 To add an issuer, add an entry to `carddues/issuers.py` with its sending domains
 and a text marker, then a small class in `banks.py` if its wording is unusual.
@@ -174,31 +299,35 @@ says how many are left, so **Try these again** on the dashboard (or
 ends. The pass covers that issuer's attachments plus any whose issuer was never
 recorded, which is what older log rows look like.
 
-## What the dashboard shows per card
+## Troubleshooting
 
-The latest statement, always. When more than one cycle is stored, **Statements**
-lists them newest first and picking one shows that month's figures, with a way
-back to the latest. **Show transactions** opens the line items of whichever
-statement is on screen — date, merchant, category and amount, credits netted off
-in the total — and closes them again.
-
-## Where the data lives
-
-Everything is in `~/.carddues/`: a SQLite database, the OAuth token, and
-downloaded PDFs (deleted after parsing, except locked ones kept for a retry, or
-all of them with `--keep-files`). Nothing is sent anywhere. Set `CARDDUES_HOME`
-to move it.
-
-This project never asks for net banking credentials and does no screen scraping.
+| Symptom | What to try |
+|---------|-------------|
+| Dashboard shows **Fetch from Gmail** but Connect never worked / old UI | Another process still owns port 8765 — see [RESTART.md](RESTART.md) |
+| Gmail fetch fails after ~7 days | OAuth consent still in **Testing** — reconnect, or publish to Production ([docs/gmail-oauth.md](docs/gmail-oauth.md)) |
+| Statements stay **locked** | Add `--name` / `--dob` (and last4) on the card, or unlock once on the dashboard / `carddues unlock` |
+| Wrong billed month total | Cards tab uses **`statement_date` + `total_due`**, not txn calendar days. A statement dated 22 Jul counts fully in July |
+| Expenses empty after Fetch | Alerts need matching subjects and no PDF attachment; statements are excluded on purpose |
+| Parser missed dues / dates | `carddues set` for a manual override; `carddues audit` / `carddues reparse` after a parser fix |
+| Move all data | Set `CARDDUES_HOME` before any command; copy the old directory if migrating |
 
 ## Tests
 
 ```bash
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
+# or: uv run pytest
 ```
 
 The suite covers the parsers against realistic statement layouts, real encrypted
 PDF unlocking, password rules read from real issuer wordings, transaction and
-category extraction, the statement history picker, retrying a backlog against a
-stubbed Gmail, the due-resolution rules, and the dashboard routes.
+category extraction, expenses ingest, the Cards-tab billed month totals
+(`total_due` by `statement_date`), the statement history picker, retrying a
+backlog against a stubbed Gmail, the due-resolution rules, and the dashboard
+routes.
+
+Developer helper (writes golden fixtures from your own kept PDFs):
+
+```bash
+carddues dump-golden --out tests/golden
+```

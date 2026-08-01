@@ -121,6 +121,7 @@ class Expense:
     source: str = SOURCE_MANUAL
     id: int | None = None
     category: str | None = None
+    category_source: str | None = None
     source_ref: str | None = None
     note: str | None = None
     created_at: datetime | None = None

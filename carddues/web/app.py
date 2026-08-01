@@ -11,12 +11,13 @@ from flask import Flask, Response, flash, redirect, render_template, request, se
 from .. import config, db, dues, expense_ingest, gmail, ingest, issuers
 from ..categories import (
     CATEGORY_KEYWORDS,
+    apply_category_rules,
     category_spend_totals,
     merchant_key,
     remember_merchant_category,
 )
 from ..dues import format_inr
-from ..models import SOURCE_GMAIL, SOURCE_MANUAL, Card, Expense, StatementRecord
+from ..models import CATEGORY_USER, SOURCE_GMAIL, SOURCE_MANUAL, Card, Expense, StatementRecord
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,14 @@ def _parse_date(value: str | None) -> date | None:
 def format_dmy(value: date | datetime | None) -> str:
     """Dates are written and read the Indian way: 05/08/2026."""
     return value.strftime("%d/%m/%Y") if value is not None else ""
+
+
+def _flash_reapply_stats(stats: dict[str, int]) -> None:
+    flash(
+        f"Re-applied rules to {stats['expenses_updated']} expenses and "
+        f"{stats['transactions_updated']} transactions.",
+        "success",
+    )
 
 
 def _parse_amount(value: str | None) -> float | None:
@@ -244,6 +253,15 @@ def create_app() -> Flask:
         month_end_exclusive = _month_window(month_start)[1]
         expenses = db.list_expenses(conn, start=month_start, end=month_end_exclusive)
         expense_total = db.expense_total(conn, start=month_start, end=month_end_exclusive)
+        card_month_txns = db.list_transactions_in_range(
+            conn, start=month_start, end=month_end_exclusive
+        )
+        card_spend_total = db.card_spend_total(
+            conn, start=month_start, end=month_end_exclusive
+        )
+        card_spend_by_card = db.card_spend_by_card(
+            conn, start=month_start, end=month_end_exclusive
+        )
 
         return render_template(
             "index.html",
@@ -267,6 +285,9 @@ def create_app() -> Flask:
             expense_prev_month=_shift_month(month_start, -1).strftime("%Y-%m"),
             expense_next_month=_shift_month(month_start, 1).strftime("%Y-%m"),
             expense_months=db.expense_months(conn),
+            card_spend_total=card_spend_total,
+            card_spend_by_card=card_spend_by_card,
+            card_category_totals=category_spend_totals(card_month_txns),
             category_phrases=db.list_category_phrases(conn),
             merchant_category_rows=db.list_merchant_categories(conn),
             known_categories=list(CATEGORY_KEYWORDS.keys()),
@@ -647,6 +668,7 @@ def create_app() -> Flask:
             flash("Enter a phrase and a category.", "error")
         else:
             flash(f"Phrase “{phrase}” → {category}.", "success")
+            _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
 
     @app.post("/category-phrases/<int:phrase_id>/edit")
@@ -662,6 +684,7 @@ def create_app() -> Flask:
             flash("Could not update that phrase (gone or duplicate).", "error")
         else:
             flash(f"Updated phrase “{phrase}” → {category}.", "success")
+            _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
 
     @app.post("/category-phrases/<int:phrase_id>/delete")
@@ -672,6 +695,7 @@ def create_app() -> Flask:
             flash("That phrase is gone.", "error")
         else:
             flash("Removed phrase rule.", "success")
+            _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
 
     @app.post("/merchant-categories")
@@ -686,20 +710,29 @@ def create_app() -> Flask:
             return redirect(url_for("index", tab="categories"))
         db.upsert_merchant_category_key(conn, key, category)
         flash(f"Merchant “{key}” → {category}.", "success")
+        _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
 
     @app.post("/merchant-categories/<path:key>/edit")
     def edit_merchant_category(key: str):
         conn = db.connect()
         db.init(conn)
+        merchant = (request.form.get("merchant") or "").strip()
         category = (request.form.get("category") or "").strip()
-        if not category:
-            flash("Enter a category.", "error")
+        if not merchant or not category:
+            flash("Enter a merchant and a category.", "error")
             return redirect(url_for("index", tab="categories"))
-        if not db.update_merchant_category(conn, key, category):
+        new_key = merchant_key(merchant)
+        if not new_key:
+            flash("Enter a merchant and a category.", "error")
+            return redirect(url_for("index", tab="categories"))
+        if not db.update_merchant_category(
+            conn, key, category, new_key=new_key
+        ):
             flash("That merchant mapping is gone.", "error")
         else:
-            flash(f"Updated “{key}” → {category}.", "success")
+            flash(f"Updated “{new_key}” → {category}.", "success")
+            _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
 
     @app.post("/merchant-categories/<path:key>/delete")
@@ -710,6 +743,14 @@ def create_app() -> Flask:
             flash("That merchant mapping is gone.", "error")
         else:
             flash(f"Removed “{key}”.", "success")
+            _flash_reapply_stats(apply_category_rules(conn))
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/categories/reapply")
+    def reapply_categories():
+        conn = db.connect()
+        db.init(conn)
+        _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
 
     @app.post("/expenses")
@@ -735,6 +776,7 @@ def create_app() -> Flask:
                 amount=amount,
                 description=description,
                 category=category,
+                category_source=CATEGORY_USER if category else None,
                 note=note,
                 source=SOURCE_MANUAL,
             ),
@@ -771,6 +813,7 @@ def create_app() -> Flask:
             amount=amount,
             description=description,
             category=category,
+            category_source=CATEGORY_USER if category else None,
             note=note,
         )
         if category:
@@ -853,6 +896,33 @@ def create_app() -> Flask:
             back_url=back,
             today=date.today(),
         )
+
+    @app.post("/expenses/refresh")
+    def refresh_expenses():
+        """Re-fetch Gmail alerts to fix boilerplate descriptions / categories."""
+        conn = db.connect()
+        db.init(conn)
+        if not gmail.is_connected():
+            flash("Connect Gmail first to refresh expense descriptions.", "error")
+            return redirect(url_for("index", tab="expenses"))
+        try:
+            summary = expense_ingest.refresh_gmail_expenses(conn, interactive=False)
+        except gmail.GmailNotConfigured as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index", tab="expenses"))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Expense refresh failed")
+            flash(f"Could not refresh expenses: {exc}", "error")
+            return redirect(url_for("index", tab="expenses"))
+
+        flash(
+            f"Refreshed {summary.updated} expense(s) from Gmail"
+            + (f"; skipped {summary.skipped}" if summary.skipped else "")
+            + (f"; failed {summary.failed}" if summary.failed else "")
+            + ".",
+            "success" if summary.updated or not summary.failed else "warning",
+        )
+        return redirect(url_for("index", tab="expenses"))
 
     @app.post("/expenses/fetch")
     def fetch_expenses():

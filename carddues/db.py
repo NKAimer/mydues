@@ -90,6 +90,7 @@ CREATE TABLE IF NOT EXISTS expenses (
     amount REAL NOT NULL,
     description TEXT NOT NULL,
     category TEXT,
+    category_source TEXT,
     source TEXT NOT NULL,
     source_ref TEXT,
     note TEXT,
@@ -125,7 +126,10 @@ ADDED_COLUMNS = {
         "received_at": "TEXT",
         "issuer": "TEXT",
         "password_rule": "TEXT",
-    }
+    },
+    "expenses": {
+        "category_source": "TEXT",
+    },
 }
 
 
@@ -623,6 +627,7 @@ def _expense_from_row(row: sqlite3.Row) -> Expense:
         amount=float(row["amount"]),
         description=row["description"],
         category=row["category"],
+        category_source=row["category_source"],
         source=row["source"],
         source_ref=row["source_ref"],
         note=row["note"],
@@ -636,14 +641,16 @@ def add_expense(conn: sqlite3.Connection, expense: Expense) -> int | None:
         cursor = conn.execute(
             """
             INSERT INTO expenses (
-                spent_on, amount, description, category, source, source_ref, note, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                spent_on, amount, description, category, category_source,
+                source, source_ref, note, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _iso(expense.spent_on),
                 expense.amount,
                 expense.description.strip(),
                 expense.category,
+                expense.category_source,
                 expense.source,
                 expense.source_ref,
                 expense.note,
@@ -684,16 +691,26 @@ def update_expense(
     amount: float,
     description: str,
     category: str | None,
+    category_source: str | None = None,
     note: str | None = None,
 ) -> bool:
     """Update editable fields; leaves source / source_ref alone. True if a row changed."""
     cursor = conn.execute(
         """
         UPDATE expenses
-        SET spent_on = ?, amount = ?, description = ?, category = ?, note = ?
+        SET spent_on = ?, amount = ?, description = ?, category = ?,
+            category_source = ?, note = ?
         WHERE id = ?
         """,
-        (_iso(spent_on), amount, description.strip(), category, note, expense_id),
+        (
+            _iso(spent_on),
+            amount,
+            description.strip(),
+            category,
+            category_source,
+            note,
+            expense_id,
+        ),
     )
     conn.commit()
     return cursor.rowcount > 0
@@ -714,6 +731,93 @@ def expense_total(conn: sqlite3.Connection, *, start: date, end: date) -> float:
         (_iso(start), _iso(end)),
     ).fetchone()
     return float(row["total"])
+
+
+def list_transactions_in_range(
+    conn: sqlite3.Connection, *, start: date, end: date
+) -> list[Transaction]:
+    """Line items on statements whose statement_date falls in [start, end)."""
+    rows = conn.execute(
+        """
+        SELECT t.* FROM transactions t
+        JOIN statements s ON s.id = t.statement_id
+        WHERE s.statement_date IS NOT NULL
+          AND s.statement_date >= ? AND s.statement_date < ?
+        ORDER BY t.txn_date IS NULL, t.txn_date, t.id
+        """,
+        (_iso(start), _iso(end)),
+    ).fetchall()
+    return [
+        Transaction(
+            id=row["id"],
+            txn_date=_as_date(row["txn_date"]),
+            description=row["description"],
+            amount=float(row["amount"]),
+            kind=row["kind"],
+            category=row["category"],
+            category_source=row["category_source"],
+        )
+        for row in rows
+    ]
+
+
+def card_spend_total(conn: sqlite3.Connection, *, start: date, end: date) -> float:
+    """Sum of statement total_due with statement_date in [start, end).
+
+    Matches the billed amount for each card's statement in that month (not
+    calendar-day purchase totals, which split a billing cycle across months).
+    """
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(total_due), 0) AS total FROM statements
+        WHERE statement_date IS NOT NULL
+          AND statement_date >= ? AND statement_date < ?
+        """,
+        (_iso(start), _iso(end)),
+    ).fetchone()
+    return float(row["total"])
+
+
+def card_spend_by_card(
+    conn: sqlite3.Connection, *, start: date, end: date
+) -> list[dict]:
+    """Statement total_due per card for statement_date in [start, end), largest first."""
+    rows = conn.execute(
+        """
+        SELECT c.id AS card_id, c.label AS label, c.last4 AS last4,
+               COALESCE(SUM(s.total_due), 0) AS total
+        FROM statements s
+        JOIN cards c ON c.id = s.card_id
+        WHERE s.statement_date IS NOT NULL
+          AND s.statement_date >= ? AND s.statement_date < ?
+        GROUP BY c.id
+        HAVING total > 0
+        ORDER BY total DESC, c.label COLLATE NOCASE
+        """,
+        (_iso(start), _iso(end)),
+    ).fetchall()
+    return [
+        {
+            "card_id": int(row["card_id"]),
+            "label": row["label"],
+            "last4": row["last4"],
+            "total": round(float(row["total"]), 2),
+        }
+        for row in rows
+    ]
+
+
+def card_spend_months(conn: sqlite3.Connection) -> list[str]:
+    """YYYY-MM keys that have at least one dated statement, newest first."""
+    rows = conn.execute(
+        """
+        SELECT DISTINCT strftime('%Y-%m', statement_date) AS month
+        FROM statements
+        WHERE statement_date IS NOT NULL
+        ORDER BY month DESC
+        """
+    ).fetchall()
+    return [row["month"] for row in rows if row["month"]]
 
 
 def expense_months(conn: sqlite3.Connection) -> list[str]:
@@ -971,22 +1075,51 @@ def upsert_merchant_category_key(
 
 
 def update_merchant_category(
-    conn: sqlite3.Connection, merchant_key: str, category: str
+    conn: sqlite3.Connection,
+    merchant_key: str,
+    category: str,
+    *,
+    new_key: str | None = None,
 ) -> bool:
-    """Change the category for an existing merchant key. True if a row changed."""
+    """Change category and optionally rename the merchant key. True if saved."""
     category = (category or "").strip()
-    if not merchant_key or not category:
+    old_key = (merchant_key or "").strip()
+    target = (new_key or old_key).strip()
+    if not old_key or not category or not target:
         return False
-    cursor = conn.execute(
+
+    exists = conn.execute(
+        "SELECT 1 FROM merchant_categories WHERE merchant_key = ?", (old_key,)
+    ).fetchone()
+    if exists is None:
+        return False
+
+    now = datetime.now().isoformat(timespec="seconds")
+    if target == old_key:
+        cursor = conn.execute(
+            """
+            UPDATE merchant_categories
+            SET category = ?, updated_at = ?
+            WHERE merchant_key = ?
+            """,
+            (category, now, old_key),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    conn.execute(
         """
-        UPDATE merchant_categories
-        SET category = ?, updated_at = ?
-        WHERE merchant_key = ?
+        INSERT INTO merchant_categories (merchant_key, category, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT (merchant_key) DO UPDATE SET
+            category = excluded.category,
+            updated_at = excluded.updated_at
         """,
-        (category, datetime.now().isoformat(timespec="seconds"), merchant_key),
+        (target, category, now),
     )
+    conn.execute("DELETE FROM merchant_categories WHERE merchant_key = ?", (old_key,))
     conn.commit()
-    return cursor.rowcount > 0
+    return True
 
 
 def delete_merchant_category(conn: sqlite3.Connection, merchant_key: str) -> bool:

@@ -20,6 +20,9 @@
           <form method="post" action="{{ url_for('fetch_expenses') }}" class="js-progress-form" data-job="expenses" data-title="Fetching expense alerts">
             <button class="btn primary" type="submit">Fetch expense alerts</button>
           </form>
+          <form method="post" action="{{ url_for('refresh_expenses') }}">
+            <button class="btn subtle" type="submit">Refresh descriptions from Gmail</button>
+          </form>
           <form method="post" action="{{ url_for('auth_disconnect') }}">
             <button class="btn subtle" type="submit">Disconnect Gmail</button>
           </form>
@@ -64,7 +67,7 @@
 
   <nav class="tabs" aria-label="Main">
     <a class="tab {% if tab == 'cards' %}active{% endif %}"
-       href="{{ url_for('index', tab='cards') }}">Credit cards</a>
+       href="{{ url_for('index', tab='cards', month=expense_month_key) }}">Credit cards</a>
     <a class="tab {% if tab == 'expenses' %}active{% endif %}"
        href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">Expenses</a>
     <a class="tab {% if tab == 'categories' %}active{% endif %}"
@@ -94,6 +97,7 @@
       <h2>{{ expense_month_label }}</h2>
       <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_next_month) }}">Next →</a>
     </div>
+    <p class="sub">Descriptions come from the alert text. If a row looks like boilerplate, use Refresh descriptions from Gmail.</p>
 
     {% if expenses %}
       <table class="expense-table">
@@ -136,7 +140,8 @@
                       <input type="text" name="description" value="{{ expense.description }}" required>
                     </label>
                     <label>Category
-                      <input type="text" name="category" value="{{ expense.category or '' }}" placeholder="optional">
+                      <input type="text" name="category" list="known-categories"
+                             value="{{ expense.category or '' }}" placeholder="optional">
                     </label>
                     <label>Note
                       <input type="text" name="note" value="{{ expense.note or '' }}" placeholder="optional">
@@ -176,7 +181,7 @@
         <input type="text" name="description" placeholder="What was it for?" required>
       </label>
       <label>Category
-        <input type="text" name="category" placeholder="optional">
+        <input type="text" name="category" list="known-categories" placeholder="optional">
       </label>
       <label>Note
         <input type="text" name="note" placeholder="optional">
@@ -186,6 +191,14 @@
   </section>
 
   {% elif tab == 'categories' %}
+
+  <section class="panel">
+    <h2>Re-apply rules</h2>
+    <p class="sub">Updates blank and auto-categorised rows. Learned merchants also correct issuer-printed labels. Manual edits stay put.</p>
+    <form method="post" action="{{ url_for('reapply_categories') }}">
+      <button class="btn primary" type="submit">Re-apply category rules</button>
+    </form>
+  </section>
 
   <section class="panel">
     <h2>Phrase rules</h2>
@@ -246,7 +259,7 @@
 
   <section class="panel">
     <h2>Learned merchants</h2>
-    <p class="sub">Exact merchant keys remembered when you set a category on an expense or transaction.</p>
+    <p class="sub">Merchant keys remembered when you set a category on an expense or transaction. A short distinctive fragment is enough (e.g. <code>apollo</code>).</p>
     {% if merchant_category_rows %}
       <table class="expense-table">
         <thead>
@@ -265,6 +278,9 @@
                 <details class="expense-edit">
                   <summary class="btn subtle">Edit</summary>
                   <form method="post" action="{{ url_for('edit_merchant_category', key=row.merchant_key) }}" class="grid-form">
+                    <label>Merchant
+                      <input type="text" name="merchant" value="{{ row.merchant_key }}" required>
+                    </label>
                     <label>Category
                       <input type="text" name="category" list="known-categories"
                              value="{{ row.category }}" required>
@@ -298,12 +314,6 @@
     </form>
   </section>
 
-  <datalist id="known-categories">
-    {% for label in known_categories %}
-      <option value="{{ label }}"></option>
-    {% endfor %}
-  </datalist>
-
   {% else %}
 
   {% if not gmail_connected %}
@@ -332,6 +342,46 @@
         <p><code class="copyable">{{ credentials_path }}</code></p>
         <p class="sub">Reload this page once the file is in place.</p>
       {% endif %}
+    </section>
+  {% endif %}
+
+  <section class="panel expenses-month">
+    <div class="month-nav">
+      <a class="btn subtle" href="{{ url_for('index', tab='cards', month=expense_prev_month) }}">← Prev</a>
+      <h2>{{ expense_month_label }}</h2>
+      <a class="btn subtle" href="{{ url_for('index', tab='cards', month=expense_next_month) }}">Next →</a>
+    </div>
+    <p class="sub">Billed statement totals for the month (by statement date), not purchase calendar days.</p>
+  </section>
+
+  <section class="summary">
+    <div class="stat">
+      <span class="stat-label">Billed in {{ expense_month_label }}</span>
+      <span class="stat-value">{{ card_spend_total | inr }}</span>
+      <span class="stat-foot">
+        {{ card_spend_by_card | length }} card{{ '' if card_spend_by_card|length == 1 else 's' }}
+      </span>
+      {% if card_category_totals %}
+        <ul class="category-totals">
+          {% for label, amount in card_category_totals %}
+            <li><span class="cat-label">{{ label }}</span> <span class="cat-amount">{{ amount | inr }}</span></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if card_spend_by_card %}
+    <section class="panel">
+      <h2>By card</h2>
+      <ul class="category-totals card-spend-by-card">
+        {% for row in card_spend_by_card %}
+          <li>
+            <span class="cat-label">{{ row.label }} ••{{ row.last4 }}</span>
+            <span class="cat-amount">{{ row.total | inr }}</span>
+          </li>
+        {% endfor %}
+      </ul>
     </section>
   {% endif %}
 
@@ -499,7 +549,8 @@
                               <input type="hidden" name="statement" value="{{ view.record.id }}">
                             {% endif %}
                             <label>Category
-                              <input type="text" name="category" value="{{ txn.category or '' }}" placeholder="optional">
+                              <input type="text" name="category" list="known-categories"
+                                     value="{{ txn.category or '' }}" placeholder="optional">
                             </label>
                             <button class="btn primary" type="submit">Save</button>
                           </form>
@@ -687,6 +738,12 @@
     <a href="{{ url_for('api_dues') }}">JSON</a>
   </footer>
 </div>
+
+  <datalist id="known-categories">
+    {% for label in known_categories %}
+      <option value="{{ label }}"></option>
+    {% endfor %}
+  </datalist>
 
 <dialog class="progress-dialog" id="progress-dialog" aria-labelledby="progress-title">
   <div class="progress-card">

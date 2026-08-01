@@ -107,11 +107,69 @@ def test_parse_alert_falls_back_to_cleaned_subject():
         received_at=datetime(2026, 8, 2, 9, 0),
     )
     assert expense is not None
-    assert "INR 99" in expense.description or "99.00" in expense.description
+    assert expense.amount == pytest.approx(99.0)
+    # No usable merchant in body/subject → placeholder, never OTP boilerplate.
     assert "Do not share OTP" not in expense.description
+    assert "confirm that" not in expense.description.lower()
     assert len(expense.description) <= expense_ingest._DESC_MAX
     if expense.note:
         assert len(expense.note) <= expense_ingest._NOTE_MAX
+
+
+def test_parse_hsbc_purchase_at_merchant():
+    expense = expense_ingest.parse_alert_email(
+        subject="Please confirm that your Credit card no ending with 7672",
+        body=(
+            "You have used your HSBC Credit Card ending with 7672 for a purchase "
+            "transaction of Rs.1,250.00 at APOLLO PHARMACY IND on 01-08-2026."
+        ),
+        received_at=datetime(2026, 8, 1, 10, 0),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(1250.0)
+    assert "APOLLO" in expense.description.upper()
+    assert "confirm that" not in expense.description.lower()
+    assert expense.category == "Health"
+
+
+def test_parse_rejects_visa_marketing_as_description():
+    expense = expense_ingest.parse_alert_email(
+        subject="Transaction Alert: INR 10.00 spent",
+        body=(
+            "Rs. 10.00 spent at a world of Visa Infinite benefits Everyday cashback "
+            "using your card on 01-08-2026."
+        ),
+        received_at=datetime(2026, 8, 1, 11, 0),
+    )
+    assert expense is not None
+    assert "visa infinite" not in expense.description.lower()
+    assert "everyday cashback" not in expense.description.lower()
+
+
+def test_parse_hdfc_upi_prefers_body_merchant_over_vpa_subject():
+    expense = expense_ingest.parse_alert_email(
+        subject="UPI txn uber1.rzp@hdfcbank Date",
+        body=(
+            "HDFC BANK --> Dear Customer, You have done a UPI txn. "
+            "Rs. 220.00 paid to UBER INDIA on 01-08-2026 via UPI."
+        ),
+        received_at=datetime(2026, 8, 1, 12, 0),
+    )
+    assert expense is not None
+    assert "UBER" in expense.description.upper()
+    assert "confirm that" not in expense.description.lower()
+
+
+def test_parse_upi_payment_alert():
+    expense = expense_ingest.parse_alert_email(
+        subject="UPI payment of Rs.2550.00",
+        body="You paid Rs.2550.00 to MERCHANT STORE via UPI on 25-07-2026.",
+        received_at=datetime(2026, 7, 25, 14, 0),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(2550.0)
+    assert expense.spent_on == date(2026, 7, 25)
+    assert "MERCHANT" in expense.description.upper()
 
 
 def test_parse_alert_skips_statement_subjects():
@@ -156,15 +214,67 @@ def test_alert_query_requires_transaction_subjects_and_skips_loans():
     assert "from:hdfcbank" not in query
 
 
-def test_parse_upi_payment_alert():
-    expense = expense_ingest.parse_alert_email(
-        subject="UPI payment of Rs.2550.00",
-        body="You paid Rs.2550.00 to MERCHANT STORE via UPI on 25-07-2026.",
-        received_at=datetime(2026, 7, 25, 14, 0),
+def test_refresh_expense_from_gmail_updates_bad_description(conn, monkeypatch):
+    from carddues import gmail
+    from carddues.models import CATEGORY_USER
+
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=1250.0,
+            description="confirm that your Credit card no ending with 7672",
+            category=None,
+            category_source=None,
+            source=SOURCE_GMAIL,
+            source_ref="msg-refresh-1",
+        ),
     )
-    assert expense is not None
-    assert expense.amount == pytest.approx(2550.0)
-    assert expense.spent_on == date(2026, 7, 25)
+    message = gmail.Message(
+        id="msg-refresh-1",
+        sender="alerts@hsbc.co.in",
+        subject="Please confirm that your Credit card no ending with 7672",
+        internal_date=int(datetime(2026, 8, 1, 10, 0).timestamp() * 1000),
+        body=(
+            "You have used your HSBC Credit Card ending with 7672 for a purchase "
+            "transaction of Rs.1,250.00 at APOLLO PHARMACY IND on 01-08-2026."
+        ),
+    )
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+    monkeypatch.setattr(gmail, "service", lambda **_: object())
+    monkeypatch.setattr(gmail, "get_message", lambda *_a, **_k: message)
+
+    expense = db.get_expense(conn, expense_id)
+    assert expense_ingest.refresh_expense_from_gmail(conn, expense) is True
+    updated = db.get_expense(conn, expense_id)
+    assert "APOLLO" in updated.description.upper()
+    assert updated.category == "Health"
+
+    # Manual category is preserved on refresh.
+    db.update_expense(
+        conn,
+        expense_id,
+        spent_on=updated.spent_on,
+        amount=updated.amount,
+        description=updated.description,
+        category="Travel",
+        category_source=CATEGORY_USER,
+        note=updated.note,
+    )
+    expense = db.get_expense(conn, expense_id)
+    expense_ingest.refresh_expense_from_gmail(conn, expense)
+    preserved = db.get_expense(conn, expense_id)
+    assert preserved.category == "Travel"
+    assert preserved.category_source == CATEGORY_USER
+    assert "APOLLO" in preserved.description.upper()
+
+
+def test_expenses_tab_shows_refresh_affordance(client, monkeypatch):
+    from carddues import gmail
+
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+    page = client.get("/?tab=expenses").get_data(as_text=True)
+    assert "Refresh descriptions from Gmail" in page
 
 
 def test_expenses_tab_and_manual_add(client, conn):

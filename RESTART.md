@@ -14,11 +14,12 @@ lsof -ti tcp:8765 | xargs kill
 
 ## 2. Start the server again
 
-From the project directory:
+From the project directory (after setup — see [README.md](README.md)):
 
 ```bash
-cd ~/Projects/card-dues
+cd /path/to/card-dues
 .venv/bin/python -m carddues serve
+# or: uv run carddues serve
 ```
 
 The dashboard will be available at:
@@ -42,7 +43,8 @@ curl -s -o /dev/null -w "dashboard %{http_code}\n" \
   http://127.0.0.1:8765/
 ```
 
-An HTTP `200` means the dashboard is responding.
+An HTTP `200` means the dashboard is responding. You should see three tabs:
+**Credit cards**, **Expenses**, and **Categories**.
 
 ## Development mode
 
@@ -57,11 +59,13 @@ Do not use debug mode when exposing the dashboard beyond your local machine.
 ## After updating the application
 
 The first request after a restart applies database migrations automatically.
-After restarting, reload the dashboard before fetching Gmail statements.
+After restarting, reload the dashboard before fetching Gmail statements or
+expense alerts.
 
 The current application should show **Connect Gmail** when Gmail is not connected.
-If it still shows **Fetch from Gmail**, an older server process is still serving
-the page. Stop the process on port `8765` and start it again.
+If it still shows **Fetch from Gmail** (or an older layout without Expenses /
+Categories), an older server process is still serving the page. Stop the process
+on port `8765` and start it again.
 
 ## Troubleshooting
 
@@ -77,4 +81,11 @@ Start on another port if necessary:
 .venv/bin/python -m carddues serve --port 8766
 ```
 
-Then open <http://127.0.0.1:8766>.
+Then open <http://127.0.0.1:8766>. If you use a web OAuth client, add the matching
+redirect URI in Google Cloud Console:
+
+```
+http://127.0.0.1:8766/oauth/callback
+```
+
+For Gmail token expiry and reconnect steps, see [docs/gmail-oauth.md](docs/gmail-oauth.md).

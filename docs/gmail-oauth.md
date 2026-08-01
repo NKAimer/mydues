@@ -1,10 +1,16 @@
 # Gmail OAuth: expiry and renewal
 
-Card Dues uses Google OAuth with scope `gmail.readonly`.
-Files live under `~/.carddues/`:
+Card Dues uses Google OAuth with scope `gmail.readonly` for statement PDFs and
+(separately) expense-alert emails. Files live under `~/.carddues/` (or
+`$CARDDUES_HOME`):
 
-- `credentials.json` — OAuth client from Google Cloud Console
-- `token.json` — access + refresh tokens after Connect Gmail
+| File | Role |
+|------|------|
+| `credentials.json` | OAuth client from Google Cloud Console (or path from `CARDDUES_CREDENTIALS`) |
+| `token.json` | Access + refresh tokens after **Connect Gmail** |
+
+Full first-time setup (Cloud Console, Desktop vs Web client, redirect URI) is in
+[README.md](../README.md#connect-gmail).
 
 ## What expires when
 
@@ -23,15 +29,20 @@ You only need to reconnect when the **refresh token** dies or is revoked.
 2. Click **Disconnect Gmail** (clears `token.json`)
 3. Optional: revoke the app at https://myaccount.google.com/permissions
 4. Click **Connect Gmail** and finish consent
-5. Confirm Fetch works
+5. Confirm **Fetch from Gmail** (Credit cards) and/or **Fetch expense alerts**
+   (Expenses) work
 
-Or from a terminal (desktop client):
+Or from a terminal (desktop OAuth client only):
 
 ```bash
 .venv/bin/python -m carddues auth
 ```
 
-If `credentials.json` is missing, recreate the OAuth client in Google Cloud Console, enable the Gmail API, download JSON to `~/.carddues/credentials.json`, then Connect again.
+Web clients must use the dashboard Connect flow; `carddues auth` will tell you so.
+
+If `credentials.json` is missing, recreate the OAuth client in Google Cloud
+Console, enable the Gmail API, download JSON to `~/.carddues/credentials.json`
+(or your `CARDDUES_CREDENTIALS` path), then Connect again.
 
 ## Move OAuth consent from Testing to Production
 
@@ -44,4 +55,16 @@ Avoids renewing every ~7 days for a personal app.
 5. Disconnect Gmail (and optionally revoke under Google Account permissions)
 6. Connect Gmail again so a new production refresh token is stored
 
-No Card Dues code changes are required. Keep Gmail API enabled and the same `credentials.json`.
+No Card Dues code changes are required. Keep Gmail API enabled and the same
+`credentials.json`.
+
+## Redirect URI checklist
+
+Default dashboard URL: `http://127.0.0.1:8765`
+
+- **Web application** client: authorised redirect URI must be
+  `http://127.0.0.1:<port>/oauth/callback` for the port you actually serve on
+- **Desktop app** client: loopback redirect is handled by Google; no URI list to edit
+
+If Fetch or Connect fails after changing `--port`, update the redirect URI and
+reload the dashboard (see [RESTART.md](../RESTART.md)).
