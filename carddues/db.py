@@ -106,6 +106,14 @@ CREATE TABLE IF NOT EXISTS merchant_categories (
     category TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS category_phrases (
+    id INTEGER PRIMARY KEY,
+    phrase TEXT NOT NULL COLLATE NOCASE,
+    category TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (phrase)
+);
 """
 
 # Columns added after the first release. SQLite cannot express these with
@@ -835,3 +843,125 @@ def count_parsed_ingest(conn: sqlite3.Connection, *, issuer: str | None = None) 
     return conn.execute(
         f"SELECT COUNT(*) AS total FROM ingest_log WHERE {where}", params
     ).fetchone()["total"]
+
+
+def list_category_phrases(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, phrase, category, updated_at FROM category_phrases "
+        "ORDER BY length(phrase) DESC, phrase COLLATE NOCASE"
+    ).fetchall()
+
+
+def upsert_category_phrase(
+    conn: sqlite3.Connection, phrase: str, category: str
+) -> int | None:
+    """Insert or refresh a phrase→category rule. Returns row id, or None if blank."""
+    phrase = (phrase or "").strip()
+    category = (category or "").strip()
+    if not phrase or not category:
+        return None
+    now = datetime.now().isoformat(timespec="seconds")
+    conn.execute(
+        """
+        INSERT INTO category_phrases (phrase, category, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT (phrase) DO UPDATE SET
+            category = excluded.category,
+            updated_at = excluded.updated_at
+        """,
+        (phrase, category, now),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id FROM category_phrases WHERE phrase = ? COLLATE NOCASE", (phrase,)
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def update_category_phrase(
+    conn: sqlite3.Connection,
+    phrase_id: int,
+    *,
+    phrase: str,
+    category: str,
+) -> bool:
+    """Update phrase and category by id. True if a row changed."""
+    phrase = (phrase or "").strip()
+    category = (category or "").strip()
+    if not phrase or not category:
+        return False
+    try:
+        cursor = conn.execute(
+            """
+            UPDATE category_phrases
+            SET phrase = ?, category = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (phrase, category, datetime.now().isoformat(timespec="seconds"), phrase_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except sqlite3.IntegrityError:
+        return False
+
+
+def delete_category_phrase(conn: sqlite3.Connection, phrase_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM category_phrases WHERE id = ?", (phrase_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def list_merchant_categories(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT merchant_key, category, updated_at FROM merchant_categories "
+        "ORDER BY merchant_key COLLATE NOCASE"
+    ).fetchall()
+
+
+def upsert_merchant_category_key(
+    conn: sqlite3.Connection, merchant_key: str, category: str
+) -> bool:
+    """Insert or refresh a learned merchant mapping by its stored key."""
+    merchant_key = (merchant_key or "").strip()
+    category = (category or "").strip()
+    if not merchant_key or not category:
+        return False
+    conn.execute(
+        """
+        INSERT INTO merchant_categories (merchant_key, category, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT (merchant_key) DO UPDATE SET
+            category = excluded.category,
+            updated_at = excluded.updated_at
+        """,
+        (merchant_key, category, datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    return True
+
+
+def update_merchant_category(
+    conn: sqlite3.Connection, merchant_key: str, category: str
+) -> bool:
+    """Change the category for an existing merchant key. True if a row changed."""
+    category = (category or "").strip()
+    if not merchant_key or not category:
+        return False
+    cursor = conn.execute(
+        """
+        UPDATE merchant_categories
+        SET category = ?, updated_at = ?
+        WHERE merchant_key = ?
+        """,
+        (category, datetime.now().isoformat(timespec="seconds"), merchant_key),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def delete_merchant_category(conn: sqlite3.Connection, merchant_key: str) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM merchant_categories WHERE merchant_key = ?", (merchant_key,)
+    )
+    conn.commit()
+    return cursor.rowcount > 0

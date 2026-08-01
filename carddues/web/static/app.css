@@ -133,6 +133,12 @@ body {
 }
 .expense-edit .grid-form { margin-top: 8px; }
 
+.section-subhead {
+  margin: 20px 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .txn-edit {
   display: inline-block;
   margin-left: 6px;

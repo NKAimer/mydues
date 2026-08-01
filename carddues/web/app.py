@@ -9,7 +9,12 @@ from datetime import date, datetime
 from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
 
 from .. import config, db, dues, expense_ingest, gmail, ingest, issuers
-from ..categories import category_spend_totals, remember_merchant_category
+from ..categories import (
+    CATEGORY_KEYWORDS,
+    category_spend_totals,
+    merchant_key,
+    remember_merchant_category,
+)
 from ..dues import format_inr
 from ..models import SOURCE_MANUAL, Card, Expense, StatementRecord
 
@@ -228,7 +233,7 @@ def create_app() -> Flask:
         conn = db.connect()
         db.init(conn)
         tab = (request.args.get("tab") or "cards").strip().lower()
-        if tab not in {"cards", "expenses"}:
+        if tab not in {"cards", "expenses", "categories"}:
             tab = "cards"
 
         # ?statement=<id> looks back at one earlier cycle; the rest stay latest.
@@ -262,6 +267,9 @@ def create_app() -> Flask:
             expense_prev_month=_shift_month(month_start, -1).strftime("%Y-%m"),
             expense_next_month=_shift_month(month_start, 1).strftime("%Y-%m"),
             expense_months=db.expense_months(conn),
+            category_phrases=db.list_category_phrases(conn),
+            merchant_category_rows=db.list_merchant_categories(conn),
+            known_categories=list(CATEGORY_KEYWORDS.keys()),
         )
 
     @app.get("/auth/start")
@@ -625,6 +633,84 @@ def create_app() -> Flask:
         else:
             flash(f"{filename}: {result.detail}", "error")
         return redirect(url_for("index"))
+
+    @app.post("/category-phrases")
+    def add_category_phrase():
+        conn = db.connect()
+        db.init(conn)
+        phrase = (request.form.get("phrase") or "").strip()
+        category = (request.form.get("category") or "").strip()
+        if not phrase or not category:
+            flash("Enter a phrase and a category.", "error")
+            return redirect(url_for("index", tab="categories"))
+        if db.upsert_category_phrase(conn, phrase, category) is None:
+            flash("Enter a phrase and a category.", "error")
+        else:
+            flash(f"Phrase “{phrase}” → {category}.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/category-phrases/<int:phrase_id>/edit")
+    def edit_category_phrase(phrase_id: int):
+        conn = db.connect()
+        db.init(conn)
+        phrase = (request.form.get("phrase") or "").strip()
+        category = (request.form.get("category") or "").strip()
+        if not phrase or not category:
+            flash("Enter a phrase and a category.", "error")
+            return redirect(url_for("index", tab="categories"))
+        if not db.update_category_phrase(conn, phrase_id, phrase=phrase, category=category):
+            flash("Could not update that phrase (gone or duplicate).", "error")
+        else:
+            flash(f"Updated phrase “{phrase}” → {category}.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/category-phrases/<int:phrase_id>/delete")
+    def delete_category_phrase(phrase_id: int):
+        conn = db.connect()
+        db.init(conn)
+        if not db.delete_category_phrase(conn, phrase_id):
+            flash("That phrase is gone.", "error")
+        else:
+            flash("Removed phrase rule.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/merchant-categories")
+    def add_merchant_category():
+        conn = db.connect()
+        db.init(conn)
+        merchant = (request.form.get("merchant") or "").strip()
+        category = (request.form.get("category") or "").strip()
+        key = merchant_key(merchant)
+        if not key or not category:
+            flash("Enter a merchant and a category.", "error")
+            return redirect(url_for("index", tab="categories"))
+        db.upsert_merchant_category_key(conn, key, category)
+        flash(f"Merchant “{key}” → {category}.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/merchant-categories/<path:key>/edit")
+    def edit_merchant_category(key: str):
+        conn = db.connect()
+        db.init(conn)
+        category = (request.form.get("category") or "").strip()
+        if not category:
+            flash("Enter a category.", "error")
+            return redirect(url_for("index", tab="categories"))
+        if not db.update_merchant_category(conn, key, category):
+            flash("That merchant mapping is gone.", "error")
+        else:
+            flash(f"Updated “{key}” → {category}.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/merchant-categories/<path:key>/delete")
+    def delete_merchant_category(key: str):
+        conn = db.connect()
+        db.init(conn)
+        if not db.delete_merchant_category(conn, key):
+            flash("That merchant mapping is gone.", "error")
+        else:
+            flash(f"Removed “{key}”.", "success")
+        return redirect(url_for("index", tab="categories"))
 
     @app.post("/expenses")
     def add_expense():

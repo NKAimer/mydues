@@ -10,7 +10,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import config, db, gmail, issuers, passwords, pdfdoc, parse_quality
-from .models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
+from .categories import resolve_category
+from .models import CATEGORY_STATEMENT, SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
 from .parsers import parse_statement
 from .statement_gate import is_credit_card_mail, looks_like_credit_card_statement
 
@@ -167,6 +168,12 @@ def store(
         as_of=datetime.now(),
     )
     statement_id = db.save_statement(conn, record)
+    # Parsers resolve without a DB; apply merchant memory and user phrases here.
+    for txn in statement.transactions:
+        if txn.category_source != CATEGORY_STATEMENT:
+            category, source = resolve_category(txn.description, conn=conn)
+            txn.category = category
+            txn.category_source = source
     db.save_transactions(conn, card.id, statement_id, statement.transactions)
 
     detail = f"{card.label}: total due {statement.total_due:.2f}"

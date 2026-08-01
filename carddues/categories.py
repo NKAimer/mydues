@@ -208,11 +208,25 @@ def merchant_key(description: str) -> str:
     return text[:48]
 
 
-def categorise(description: str) -> str | None:
-    """A coarse category worked out from the merchant / narration text."""
+def categorise(
+    description: str, *, phrases: list[tuple[str, str]] | None = None
+) -> str | None:
+    """A coarse category worked out from the merchant / narration text.
+
+    User phrase rules (longest first) beat the built-in keyword map.
+    """
     if not description:
         return None
     lowered = f" {description.lower()} "
+    if phrases:
+        ordered = sorted(
+            ((p.strip(), c) for p, c in phrases if (p or "").strip()),
+            key=lambda pair: len(pair[0]),
+            reverse=True,
+        )
+        for phrase, category in ordered:
+            if phrase.lower() in lowered:
+                return category
     for category, keywords in CATEGORY_KEYWORDS.items():
         if any(keyword in lowered for keyword in keywords):
             return category
@@ -275,13 +289,14 @@ def resolve_category(
     note: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> tuple[str | None, str | None]:
-    """Pick a category: issuer print → merchant memory → keyword guess.
+    """Pick a category: issuer print → merchant memory → user phrases → builtins.
 
     Returns `(category, source)` where source is statement / memory / guess.
     """
     if printed and _LETTERS.search(printed):
         return printed.strip(), CATEGORY_STATEMENT
 
+    phrases: list[tuple[str, str]] | None = None
     if conn is not None:
         remembered = lookup_merchant_category(conn, description)
         if remembered:
@@ -290,9 +305,15 @@ def resolve_category(
             remembered = lookup_merchant_category(conn, note)
             if remembered:
                 return remembered, CATEGORY_MEMORY
+        phrases = [
+            (row["phrase"], row["category"])
+            for row in conn.execute(
+                "SELECT phrase, category FROM category_phrases"
+            ).fetchall()
+        ]
 
     blob = description or ""
     if note and note.strip() and note.strip().lower() != blob.strip().lower():
         blob = f"{blob} {note}".strip()
-    guess = categorise(blob)
+    guess = categorise(blob, phrases=phrases)
     return (guess, CATEGORY_GUESS) if guess else (None, None)

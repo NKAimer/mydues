@@ -26,6 +26,14 @@
         {% else %}
           <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
         {% endif %}
+      {% elif tab == 'categories' %}
+        {% if gmail_connected %}
+          <form method="post" action="{{ url_for('auth_disconnect') }}">
+            <button class="btn subtle" type="submit">Disconnect Gmail</button>
+          </form>
+        {% else %}
+          <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
+        {% endif %}
       {% else %}
         {% if gmail_connected %}
           <form method="post" action="{{ url_for('run_ingest') }}" class="js-progress-form" data-job="fetch" data-title="Fetching statements">
@@ -55,10 +63,12 @@
   {% endwith %}
 
   <nav class="tabs" aria-label="Main">
-    <a class="tab {% if tab != 'expenses' %}active{% endif %}"
+    <a class="tab {% if tab == 'cards' %}active{% endif %}"
        href="{{ url_for('index', tab='cards') }}">Credit cards</a>
     <a class="tab {% if tab == 'expenses' %}active{% endif %}"
        href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">Expenses</a>
+    <a class="tab {% if tab == 'categories' %}active{% endif %}"
+       href="{{ url_for('index', tab='categories') }}">Categories</a>
   </nav>
 
   {% if tab == 'expenses' %}
@@ -171,6 +181,125 @@
       <button class="btn primary" type="submit">Add expense</button>
     </form>
   </section>
+
+  {% elif tab == 'categories' %}
+
+  <section class="panel">
+    <h2>Phrase rules</h2>
+    <p class="sub">Substring matches applied after learned merchants and before built-in keywords.</p>
+    {% if category_phrases %}
+      <table class="expense-table">
+        <thead>
+          <tr>
+            <th>Phrase</th>
+            <th>Category</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in category_phrases %}
+            <tr>
+              <td>{{ row.phrase }}</td>
+              <td>{{ row.category }}</td>
+              <td class="expense-actions">
+                <details class="expense-edit">
+                  <summary class="btn subtle">Edit</summary>
+                  <form method="post" action="{{ url_for('edit_category_phrase', phrase_id=row.id) }}" class="grid-form">
+                    <label>Phrase
+                      <input type="text" name="phrase" value="{{ row.phrase }}" required>
+                    </label>
+                    <label>Category
+                      <input type="text" name="category" list="known-categories"
+                             value="{{ row.category }}" required>
+                    </label>
+                    <button class="btn primary" type="submit">Save</button>
+                  </form>
+                </details>
+                <form method="post" action="{{ url_for('delete_category_phrase', phrase_id=row.id) }}"
+                      onsubmit="return confirm('Delete this phrase rule?')">
+                  <button class="btn danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No custom phrase rules yet.</p>
+    {% endif %}
+
+    <h3 class="section-subhead">Add phrase</h3>
+    <form method="post" action="{{ url_for('add_category_phrase') }}" class="grid-form">
+      <label>Phrase
+        <input type="text" name="phrase" placeholder="e.g. cafe" required>
+      </label>
+      <label>Category
+        <input type="text" name="category" list="known-categories"
+               placeholder="Food & dining" required>
+      </label>
+      <button class="btn primary" type="submit">Add phrase</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>Learned merchants</h2>
+    <p class="sub">Exact merchant keys remembered when you set a category on an expense or transaction.</p>
+    {% if merchant_category_rows %}
+      <table class="expense-table">
+        <thead>
+          <tr>
+            <th>Merchant</th>
+            <th>Category</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in merchant_category_rows %}
+            <tr>
+              <td>{{ row.merchant_key }}</td>
+              <td>{{ row.category }}</td>
+              <td class="expense-actions">
+                <details class="expense-edit">
+                  <summary class="btn subtle">Edit</summary>
+                  <form method="post" action="{{ url_for('edit_merchant_category', key=row.merchant_key) }}" class="grid-form">
+                    <label>Category
+                      <input type="text" name="category" list="known-categories"
+                             value="{{ row.category }}" required>
+                    </label>
+                    <button class="btn primary" type="submit">Save</button>
+                  </form>
+                </details>
+                <form method="post" action="{{ url_for('delete_merchant_category', key=row.merchant_key) }}"
+                      onsubmit="return confirm('Delete this merchant mapping?')">
+                  <button class="btn danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No learned merchants yet.</p>
+    {% endif %}
+
+    <h3 class="section-subhead">Add merchant</h3>
+    <form method="post" action="{{ url_for('add_merchant_category') }}" class="grid-form">
+      <label>Merchant
+        <input type="text" name="merchant" placeholder="e.g. SWIGGY BANGALORE" required>
+      </label>
+      <label>Category
+        <input type="text" name="category" list="known-categories"
+               placeholder="Food & dining" required>
+      </label>
+      <button class="btn primary" type="submit">Add merchant</button>
+    </form>
+  </section>
+
+  <datalist id="known-categories">
+    {% for label in known_categories %}
+      <option value="{{ label }}"></option>
+    {% endfor %}
+  </datalist>
 
   {% else %}
 
