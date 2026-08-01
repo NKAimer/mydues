@@ -50,6 +50,14 @@ def _migrate_legacy_home() -> None:
             legacy_db.rename(new_db)
         except OSError:
             pass
+    # Drop sidecars left behind if the main file was renamed while WAL was open.
+    for suffix in ("-shm", "-wal"):
+        orphan = target / f"{_LEGACY_DB_NAME}{suffix}"
+        if orphan.exists() and not legacy_db.exists():
+            try:
+                orphan.unlink()
+            except OSError:
+                pass
 
 
 def home() -> Path:
