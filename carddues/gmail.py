@@ -72,12 +72,15 @@ class Message:
 
 def build_query(lookback_days: int = config.DEFAULT_LOOKBACK_DAYS) -> str:
     """Gmail search for statement mails with PDF attachments."""
+    from .statement_gate import GMAIL_SUBJECT_EXCLUSIONS
+
     senders = " OR ".join(f"from:{domain}" for domain in issuers.all_senders())
     subjects = " OR ".join(f'subject:"{hint}"' for hint in issuers.STATEMENT_SUBJECT_HINTS)
+    excluded = " ".join(f'-subject:"{token}"' for token in GMAIL_SUBJECT_EXCLUSIONS)
     return (
         f"has:attachment filename:pdf newer_than:{lookback_days}d "
-        f"(({senders}) OR ({subjects}))"
-    )
+        f"(({senders}) OR ({subjects})) {excluded}"
+    ).strip()
 
 
 def client_file() -> Path:

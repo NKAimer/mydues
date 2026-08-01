@@ -49,6 +49,40 @@ def test_reingesting_the_same_statement_does_not_duplicate(conn):
     assert len(db.statements_for_card(conn, card.id)) == 1
 
 
+def test_store_replaces_prior_cycle_when_statement_date_changes(conn):
+    ingest.store(conn, STATEMENT, source_ref="msg-1")
+    corrected = ParsedStatement(
+        total_due=45231.50,
+        min_due=2270.0,
+        due_date=date(2026, 8, 15),
+        statement_date=date(2026, 7, 28),
+        credit_limit=500000.0,
+        last4="8765",
+        issuer="hdfc",
+        parser="hdfc",
+    )
+    ingest.store(conn, corrected, source_ref="msg-1")
+
+    card = db.list_cards(conn)[0]
+    rows = db.statements_for_card(conn, card.id)
+    assert len(rows) == 1
+    assert rows[0].statement_date == date(2026, 7, 28)
+    assert rows[0].due_date == date(2026, 8, 15)
+
+
+def test_retarget_card_last4_renames_a_misread_card(conn):
+    card = Card(issuer="hdfc", label="HDFC Bank ••0722", last4="0722")
+    card.id = db.add_card(conn, card)
+
+    assert db.retarget_card_last4(conn, issuer="hdfc", from_last4="0722", to_last4="2750")
+
+    updated = db.get_card(conn, card.id)
+    assert updated is not None
+    assert updated.last4 == "2750"
+    assert "••2750" in updated.label
+    assert db.find_card(conn, issuer="hdfc", last4="0722") is None
+
+
 def test_statement_without_card_digits_needs_a_single_issuer_match(conn):
     anonymous = ParsedStatement(total_due=1000.0, issuer="hdfc")
 

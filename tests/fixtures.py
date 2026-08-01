@@ -89,6 +89,41 @@ Credit Limit : Rs. 8,00,000.00
 Available Credit Limit : Rs. 6,87,519.65
 """
 
+# Amazon Pay ICICI PDFs often paint each header letter twice. Without undoubling,
+# the real due date is missed and a sample date from the T&Cs is taken instead.
+ICICI_AMAZON_DOUBLED_HEADERS = """
+ICICI Bank Credit Card Statement
+MR. NAVEEN KUMAR
+SSTTAATTEEMMEENNTT DDAATTEE
+July 28, 2026
+PPAAYYMMEENNTT DDUUEE DDAATTEE
+August 15, 2026
+STATEMENT SUMMARY
+Total Amount due
+`7,317.00
+Minimum Amount due
+`370.00
+Credit Limit (Including cash) Available Credit (Including cash)
+`6,70,000.00 `6,62,180.00
+4315XXXXXXXX4019
+
+Interest calculation
+2 Total Amount Due on statement dated Oct 08, 2023 2,000.00
+3 Minimum Amount Due on statement dated Oct 08, 2023 100.00
+4 Payment due date - Oct 26, 2023
+5 Payment due date: Oct 26, 2025
+"""
+
+# When the header Statement Date is missing, the period end is the bill date.
+ICICI_PERIOD_ONLY = """
+ICICI Bank Credit Card Statement
+Statement Period: June 29, 2026 to July 28, 2026
+Payment Due Date : 15-08-2026
+Total Amount due : Rs. 7,317.00
+Minimum Amount due : Rs. 370.00
+Card Number: 4315 XXXX XXXX 4019
+"""
+
 SBICARD_TABLE = """
 SBI Card Statement
 Statement Date: 12 Jul 2026
@@ -99,6 +134,92 @@ INR 23,908.00 INR 1,200.00 02 Aug 2026
 Credit Limit: INR 3,50,000.00
 Available Credit Limit: INR 3,26,092.00
 Card Number 4173 XXXX XXXX 1122
+"""
+
+# Cashback PDFs put the statement number between the MAD label and the amount.
+SBICARD_CASHBACK_STMT_NO = """
+SBI Card Statement
+*Total Amount Due ( ` )
+301.00
+PLACE OF SUPPLY : MAD/23/MADHYA PRADESH
+**Minimum Amount Due( ` )
+STMT No. : A25122229867
+200.00
+Payment Due Date
+02/01/2026
+Card Number 4375 XXXX XXXX 9326
+"""
+
+# Header Statement Date must beat Statement Period + following transaction dates.
+SBICARD_CASHBACK_HEADER = """
+SBI Card Statement
+*Total Amount Due ( ` )
+301.00
+**Minimum Amount Due( ` )
+STMT No. : A25122229867
+200.00
+Credit Limit( ` ) (including cash) Cash Limit( ` )(as part of credit limit) Statement Date
+30,000.00 9,000.00 24 Dec 2025
+Available Credit Limit ( ` ) Available Cash Limit ( ` ) Payment Due Date
+29,698.97 9,000.00 13 Jan 2026
+Date Transaction Details Amount ( ` )
+for Statement Period: 25 Nov 25 to 24 Dec 25
+24 Nov 25 CARD CASHBACK CREDIT 467.00 C
+28 Nov 25 PAYMENT RECEIVED 000DP11533209091391F7R2 8,462.00 C
+Card Number XXXX XXXX XXXX 9326
+"""
+
+# Demat e-statements arrive from the same bank domain and must not become cards.
+ICICI_DEMAT_ESTATEMENT = """
+ICICI Bank
+Transaction e-Statement for ICICI Bank Demat Account IN303028 XXXXXX95
+Total Amount Due 100.00
+Account Number 81000229118968
+By CM ICICI SECURITIES LIMITED 2,026,073.00
+"""
+
+# Tata Neu Infinity: compact mask is the card; alternate account is not.
+HDFC_TATA_NEU_COMPACT = """
+HDFC Bank Credit Card Statement
+Tata Neu Infinity
+Credit Card No. 652926XXXXXX2750
+Alternate Account Number 0001010410000722758
+Statement Date 01/04/2026
+Payment Due Date 20/04/2026
+Total Amount Due 12,345.00
+Minimum Amount Due 617.00
+"""
+
+# Exact live layout from Tata Neu Infinity July-2026 PDF text extraction.
+HDFC_TATA_NEU_LIVE_LAYOUT = """
+Tata Neu Infinity HDFC Bank Credit Card Statement
+HSN Code: 997113 HDFC Bank Credit Cards GSTIN: 33AAACH2702H2Z6
+NAVEEN KUMAR Credit Card No. 652926XXXXXX2750
+F3 Subhiksha Habitat Apartment Kaggadaspura Alternate Account Number 0001010410000722758
+Statement Date 01/07/2026
+TOTAL AMOUNT DUE
+4,373.00
+MINIMUM DUE DUE DATE
+0.00 20/07/2026
+"""
+
+# YES Bank Klick puts dues on the line below the label row (live July-2026 layout).
+YESBANK_KLICK = """
+Credit Card Statement
+YES BANK KLICK
+Statement for YES BANK Card Number 3561XXXXXXXX2653
+Previous Balance :
+Rs. 6,062.00 Dr
+Statement Period: Credit Limit:
+13/06/2026 To 12/07/2026 Rs. 4,00,000.00 Current Purchases / Cash Advance
+Available Credit Limit: & Other Charges :
+Statement Date : 12/07/2026 Rs. 3,87,745.00 Rs. 16,455.00 Dr
+Total Amount Due: Cash Limit: Points Earned : 0
+Rs. 12,255.00 Rs. 0.00
+Payment & Credits Received :
+Minimum Amount Due: Available Cash Limit: Rs. 10,262.00 Cr
+Rs. 245.10 Rs. 0.00
+Payment Due Date: 01/08/2026 YES ONLINE Other Mode
 """
 
 AXIS_INLINE = """

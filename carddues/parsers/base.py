@@ -14,7 +14,15 @@ from datetime import date
 
 from .. import issuers
 from ..models import ParsedStatement
-from ..text import AMOUNT_RE, DATE_RE, find_card_last4, parse_amount, parse_date
+from ..text import (
+    AMOUNT_RE,
+    DATE_RE,
+    find_card_last4,
+    parse_amount,
+    parse_amounts,
+    parse_date,
+    parse_statement_date,
+)
 
 AMOUNT = "amount"
 DATE = "date"
@@ -229,14 +237,26 @@ def _extract_from_tables(text: str, hits: list[LabelHit]) -> dict[str, tuple[obj
     return found
 
 
+def _is_period_label(label: str) -> bool:
+    return "period" in label.lower()
+
+
 def _extract_inline(
     text: str, hits: list[LabelHit], header_lines: set[int]
 ) -> dict[str, tuple[object, str]]:
     """Read the value that sits right after each label."""
     found: dict[str, tuple[object, str]] = {}
     starts = sorted(hit.start for hit in hits)
+    # Prefer a real Statement Date / Closing Date over Statement Period.
+    ordered_hits = sorted(
+        hits,
+        key=lambda hit: (
+            hit.field == "statement_date" and _is_period_label(hit.label),
+            hit.start,
+        ),
+    )
 
-    for hit in hits:
+    for hit in ordered_hits:
         if hit.field in found:
             continue
         # Labels in a table header have their values a row below, not after them.
@@ -251,6 +271,8 @@ def _extract_inline(
         if FIELD_KIND[hit.field] == AMOUNT:
             # A date after the label must not be read as a number.
             value = parse_amount(DATE_RE.sub(" ", window))
+        elif hit.field == "statement_date":
+            value = parse_statement_date(window, label=hit.label)
         else:
             value = parse_date(window)
 
@@ -273,7 +295,17 @@ def extract_fields(
 
     values = _extract_inline(text, hits, header_lines)
     for field, result in _extract_from_tables(text, hits).items():
-        values.setdefault(field, result)
+        existing = values.get(field)
+        if existing is None:
+            values[field] = result
+            continue
+        # A header Statement Date must beat an inline Statement Period fallback.
+        if (
+            field == "statement_date"
+            and _is_period_label(existing[1])
+            and not _is_period_label(result[1])
+        ):
+            values[field] = result
     return values
 
 
@@ -309,10 +341,69 @@ class StatementParser:
             parser=self.key,
             matched_labels={field: label for field, (_, label) in values.items()},
         )
+        self._repair_min_due(statement, text)
+        self._repair_due_date(statement, text, values)
         return self.postprocess(statement, text)
 
     def postprocess(self, statement: ParsedStatement, text: str) -> ParsedStatement:
         return statement
+
+    def _repair_min_due(self, statement: ParsedStatement, text: str) -> None:
+        """Drop a minimum due that is clearly not money for this cycle.
+
+        SBI Cashback puts `STMT No. : A25122229867` between the MAD label and
+        the real amount; a leftover id larger than total due must not stick.
+        """
+        min_due = statement.min_due
+        total = statement.total_due
+        if min_due is None or total <= 0 or min_due <= total:
+            return
+
+        for hit in _collect_hits(text, self.labels):
+            if hit.field != "min_due":
+                continue
+            window = text[hit.end : hit.end + INLINE_WINDOW]
+            window = re.split(r"\n\s*\n", window)[0]
+            for amount in parse_amounts(DATE_RE.sub(" ", window)):
+                if 0 <= amount <= total:
+                    statement.min_due = amount
+                    statement.matched_labels["min_due"] = hit.label
+                    return
+        statement.min_due = None
+        statement.matched_labels.pop("min_due", None)
+
+    def _repair_due_date(
+        self,
+        statement: ParsedStatement,
+        text: str,
+        values: dict[str, tuple[object, str]],
+    ) -> None:
+        """Drop a due date that is clearly not for this cycle.
+
+        ICICI statements repeat sample lines like "Payment due date - Oct 26, 2023"
+        in the interest illustrations. Those must not beat the header date.
+        """
+        due = statement.due_date
+        statement_date = statement.statement_date
+        if due is None:
+            return
+        if statement_date is None or due >= statement_date:
+            return
+
+        for hit in _collect_hits(text, self.labels):
+            if hit.field != "due_date":
+                continue
+            window = text[hit.end : hit.end + INLINE_WINDOW]
+            window = re.split(r"\n\s*\n", window)[0]
+            candidate = parse_date(window)
+            if candidate is not None and candidate >= statement_date:
+                statement.due_date = candidate
+                statement.matched_labels["due_date"] = hit.label
+                return
+        # Nothing plausible; better blank than a years-old example date.
+        statement.due_date = None
+        values.pop("due_date", None)
+        statement.matched_labels.pop("due_date", None)
 
     @staticmethod
     def _amount(values: dict[str, tuple[object, str]], field: str) -> float | None:

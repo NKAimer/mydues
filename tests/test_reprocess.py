@@ -119,6 +119,51 @@ def test_a_file_still_on_disk_is_not_downloaded_again(conn, gmail_returns, tmp_p
     assert gmail_returns == []
 
 
+def test_a_kept_file_still_backfills_missing_mail_context(conn, gmail_returns):
+    """Older log rows have no sender/date; a kept PDF must not leave them blank."""
+    kept = gmail.attachment_path("msg-1", "july.pdf")
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    write_pdf(kept, password=PASSWORD, lines=STATEMENT_WITH_TRANSACTIONS)
+
+    summary = ingest.reprocess_pending(conn)
+
+    assert summary.parsed == 0  # still locked without a card
+    assert gmail_returns == []  # no download; metadata only
+    row = db.pending_ingest(conn)[0]
+    assert row["sender"] == "HDFC Bank <estatement@hdfcbank.net>"
+    assert row["received_at"].startswith("2026-07-28T06:15")
+    assert row["issuer"] == "hdfc"
+
+
+def test_a_kept_file_skips_gmail_when_mail_context_is_already_there(conn, monkeypatch):
+    kept = gmail.attachment_path("msg-1", "july.pdf")
+    kept.parent.mkdir(parents=True, exist_ok=True)
+    write_pdf(kept, password="secret")
+    db.log_ingest(
+        conn,
+        message_id="msg-1",
+        filename="july.pdf",
+        status=ingest.STATUS_LOCKED,
+        detail="locked",
+        sender="HDFC Bank <estatement@hdfcbank.net>",
+        received_at=datetime(2026, 7, 28, 6, 15),
+        issuer="hdfc",
+    )
+    called: list[str] = []
+
+    def boom(*_a, **_k):
+        called.append("get_message")
+        raise AssertionError("mail context is already stored")
+
+    monkeypatch.setattr(ingest.gmail, "service", lambda **_: object())
+    monkeypatch.setattr(ingest.gmail, "get_message", boom)
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+
+    ingest.reprocess_pending(conn)
+
+    assert called == []
+
+
 def test_the_line_items_are_stored_by_the_retry(conn, gmail_returns):
     card = add_card(conn)
 

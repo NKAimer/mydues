@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from carddues.parsers import parse_statement
-from carddues.text import normalize
+from carddues.text import normalize, parse_statement_date, undouble_glyphs
 
 from . import fixtures
 
@@ -49,6 +49,69 @@ def test_sbicard_table_with_currency_prefix():
     assert result.statement_date == date(2026, 7, 12)
 
 
+def test_sbicard_cashback_skips_stmt_number_for_min_due():
+    result = parse(fixtures.SBICARD_CASHBACK_STMT_NO)
+
+    assert result is not None
+    assert result.total_due == pytest.approx(301.00)
+    assert result.min_due == pytest.approx(200.00)
+    assert result.min_due != pytest.approx(25122229867.0)
+
+
+def test_sbicard_cashback_prefers_header_statement_date_over_period():
+    result = parse(fixtures.SBICARD_CASHBACK_HEADER)
+
+    assert result is not None
+    assert result.statement_date == date(2025, 12, 24)
+    assert result.due_date == date(2026, 1, 13)
+    assert result.min_due == pytest.approx(200.00)
+    assert result.statement_date != date(2025, 11, 28)
+    assert result.statement_date != date(2025, 11, 25)
+
+
+def test_statement_period_uses_the_range_end_not_later_transactions():
+    window = "25 Nov 25 to 24 Dec 25\n28 Nov 25 PAYMENT RECEIVED 8,462.00 C"
+
+    assert parse_statement_date(window, label="Statement Period") == date(2025, 12, 24)
+
+
+def test_hdfc_compact_mask_is_preferred_over_alternate_account():
+    result = parse(fixtures.HDFC_TATA_NEU_COMPACT)
+
+    assert result is not None
+    assert result.last4 == "2750"
+    assert result.last4 != "0722"
+
+
+def test_hdfc_tata_neu_live_layout_never_registers_0722():
+    """Alternate Account …0722758 must not invent card ••0722."""
+    from carddues.text import find_card_last4
+
+    raw = fixtures.HDFC_TATA_NEU_LIVE_LAYOUT
+    assert find_card_last4(raw) == "2750"
+    result = parse(raw, issuer_hint="hdfc")
+
+    assert result is not None
+    assert result.last4 == "2750"
+    assert result.total_due == pytest.approx(4373.0)
+    assert "0722" not in (result.last4 or "")
+
+
+def test_yesbank_reads_amounts_from_the_line_below_labels():
+    """Points Earned : 0 and Available Cash Limit Cr must not become dues."""
+    result = parse(fixtures.YESBANK_KLICK, issuer_hint="yesbank")
+
+    assert result is not None
+    assert result.issuer == "yesbank"
+    assert result.last4 == "2653"
+    assert result.total_due == pytest.approx(12255.0)
+    assert result.min_due == pytest.approx(245.10)
+    assert result.due_date == date(2026, 8, 1)
+    assert result.statement_date == date(2026, 7, 12)
+    assert result.total_due != 0
+    assert result.min_due != pytest.approx(-10262.0)
+
+
 def test_axis_value_on_following_line():
     result = parse(fixtures.AXIS_INLINE)
     assert result.issuer == "axis"
@@ -91,3 +154,45 @@ def test_issuer_hint_is_used():
 def test_confidence_reflects_completeness():
     full = parse(fixtures.ICICI_INLINE)
     assert full.confidence == 1.0
+
+
+def test_doubled_header_glyphs_are_collapsed():
+    assert undouble_glyphs("PPAAYYMMEENNTT DDUUEE DDAATTEE") == "PAYMENT DUE DATE"
+    assert undouble_glyphs("SSTTAATTEEMMEENNTT DDAATTEE") == "STATEMENT DATE"
+    assert undouble_glyphs("PAYMENT DUE DATE") == "PAYMENT DUE DATE"
+    assert undouble_glyphs("4321 XXXX XXXX 8765") == "4321 XXXX XXXX 8765"
+
+
+def test_icici_amazon_pay_reads_the_header_due_date_not_the_example():
+    """A years-old illustration date must not replace August 15, 2026."""
+    result = parse(fixtures.ICICI_AMAZON_DOUBLED_HEADERS, issuer_hint="icici")
+
+    assert result is not None
+    assert result.statement_date == date(2026, 7, 28)
+    assert result.due_date == date(2026, 8, 15)
+    assert result.total_due == pytest.approx(7317.0)
+    assert result.due_date != date(2023, 10, 26)
+
+
+def test_an_example_due_date_before_the_statement_is_rejected():
+    """Without a usable header, a T&Cs sample from 2023 must not be kept."""
+    text = """
+    ICICI Bank Credit Card Statement
+    Statement Date : 28-07-2026
+    Total Amount due : Rs. 1,000.00
+    4 Payment due date - Oct 26, 2023
+    """
+    result = parse(text, issuer_hint="icici")
+
+    assert result is not None
+    assert result.statement_date == date(2026, 7, 28)
+    assert result.due_date is None
+
+
+def test_a_statement_period_uses_the_closing_date():
+    """June 29 to July 28 must not store June 29 as the statement date."""
+    result = parse(fixtures.ICICI_PERIOD_ONLY, issuer_hint="icici")
+
+    assert result is not None
+    assert result.statement_date == date(2026, 7, 28)
+    assert result.due_date == date(2026, 8, 15)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import date, datetime
 from pathlib import Path
@@ -114,6 +115,10 @@ def init(conn: sqlite3.Connection) -> None:
             if column not in present:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
     conn.commit()
+    # Parser once mistook an HDFC alternate account number for last4 0722.
+    retarget_card_last4(conn, issuer="hdfc", from_last4="0722", to_last4="2750")
+    # ICICI demat e-statement was once auto-registered as HDFC ••1189.
+    purge_false_card(conn, issuer="hdfc", last4="1189")
 
 
 def _iso(value: date | datetime | None) -> str | None:
@@ -218,12 +223,86 @@ def delete_card(conn: sqlite3.Connection, card_id: int) -> None:
     conn.commit()
 
 
+def purge_false_card(conn: sqlite3.Connection, *, issuer: str, last4: str) -> bool:
+    """Delete a card that was created from a non-statement PDF."""
+    card = find_card(conn, issuer=issuer, last4=last4)
+    if card is None:
+        return False
+    delete_card(conn, card.id)
+    return True
+
+
+def retarget_card_last4(
+    conn: sqlite3.Connection,
+    *,
+    issuer: str,
+    from_last4: str,
+    to_last4: str,
+) -> bool:
+    """Rename a mis-read last4, or merge it into the real card if that exists.
+
+    Returns True when something changed.
+    """
+    bogus = find_card(conn, issuer=issuer, last4=from_last4)
+    if bogus is None:
+        return False
+    target = find_card(conn, issuer=issuer, last4=to_last4)
+    if target is None:
+        label = bogus.label or ""
+        if from_last4 in label:
+            label = label.replace(from_last4, to_last4)
+        elif "••" in label:
+            label = re.sub(r"••\d{4}\b", f"••{to_last4}", label)
+        else:
+            label = f"{label} ••{to_last4}".strip()
+        conn.execute(
+            "UPDATE cards SET last4 = ?, label = ? WHERE id = ?",
+            (to_last4, label, bogus.id),
+        )
+        conn.commit()
+        return True
+
+    if target.id == bogus.id:
+        return False
+
+    # Drop attachments already present on the real card, then move the rest.
+    conn.execute(
+        """
+        DELETE FROM statements
+        WHERE card_id = ?
+          AND source_ref IS NOT NULL
+          AND source_ref IN (
+              SELECT source_ref FROM statements
+              WHERE card_id = ? AND source_ref IS NOT NULL
+          )
+        """,
+        (bogus.id, target.id),
+    )
+    for table in ("statements", "payments", "transactions"):
+        conn.execute(
+            f"UPDATE {table} SET card_id = ? WHERE card_id = ?",
+            (target.id, bogus.id),
+        )
+    conn.execute("DELETE FROM cards WHERE id = ?", (bogus.id,))
+    conn.commit()
+    return True
+
+
 def save_statement(conn: sqlite3.Connection, record: StatementRecord) -> int:
     """Store or refresh one statement and return its id.
 
     The id is looked up rather than taken from the cursor, because an upsert
     that updates an existing cycle leaves no reliable last row id behind.
+
+    When `source_ref` is set (a Gmail message id), any prior row for that
+    attachment is removed first. Correcting a mis-read statement_date must
+    rewrite the cycle, not leave the bad dates beside the new ones.
     """
+    if record.source_ref:
+        conn.execute(
+            "DELETE FROM statements WHERE card_id = ? AND source = ? AND source_ref = ?",
+            (record.card_id, record.source, record.source_ref),
+        )
     conn.execute(
         """
         INSERT INTO statements (card_id, statement_date, due_date, total_due, min_due,
@@ -485,3 +564,33 @@ def unresolved_ingest(conn: sqlite3.Connection, limit: int | None = None) -> lis
 
 def count_unresolved_ingest(conn: sqlite3.Connection) -> int:
     return count_pending_ingest(conn)
+
+
+def parsed_ingest(
+    conn: sqlite3.Connection, *, issuer: str | None = None, limit: int | None = None
+) -> list[sqlite3.Row]:
+    """Already-parsed mail attachments, newest first — for a forced re-read."""
+    where = "status = 'parsed' AND message_id IS NOT NULL AND filename IS NOT NULL"
+    params: list = []
+    if issuer:
+        where += " AND (issuer IS NULL OR issuer = ?)"
+        params.append(issuer)
+    sql = (
+        f"SELECT * FROM ingest_log WHERE {where} "
+        "ORDER BY COALESCE(received_at, created_at) DESC"
+    )
+    if limit:
+        sql += " LIMIT ?"
+        params.append(limit)
+    return conn.execute(sql, params).fetchall()
+
+
+def count_parsed_ingest(conn: sqlite3.Connection, *, issuer: str | None = None) -> int:
+    where = "status = 'parsed' AND message_id IS NOT NULL AND filename IS NOT NULL"
+    params: list = []
+    if issuer:
+        where += " AND (issuer IS NULL OR issuer = ?)"
+        params.append(issuer)
+    return conn.execute(
+        f"SELECT COUNT(*) AS total FROM ingest_log WHERE {where}", params
+    ).fetchone()["total"]

@@ -237,6 +237,30 @@ def _reprocess(conn, *, issuer: str | None, limit: int) -> int:
     return 0
 
 
+def cmd_reparse(args) -> int:
+    """Re-read already-parsed statements so parser fixes rewrite stored dates."""
+    conn = db.connect()
+    db.init(conn)
+    try:
+        summary = ingest.reparse_parsed(conn, issuer=args.issuer, limit=args.limit)
+    except gmail.GmailNotConfigured as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 1
+
+    if not summary.results:
+        console.print("No parsed statements to re-read.")
+        return 0
+
+    console.print(
+        f"Re-parsed [green]{summary.parsed}[/green] of {len(summary.results)} statement(s)."
+    )
+    for result in summary.needs_attention:
+        console.print(f"  [yellow]{result.status}[/yellow] {result.filename}: {result.detail}")
+    if summary.remaining:
+        console.print(f"[dim]{summary.remaining} still to re-read; run it again to continue.[/dim]")
+    return 0
+
+
 def cmd_unlock(args) -> int:
     """Retry a locked attachment with a password you supply."""
     conn = db.connect()
@@ -513,6 +537,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--limit", type=int, default=ingest.REPROCESS_BATCH, help="attachments per pass"
     )
     reprocess.set_defaults(func=cmd_reprocess)
+
+    reparse = sub.add_parser(
+        "reparse", help="re-read already-parsed statements with the current parsers"
+    )
+    reparse.add_argument("--issuer", choices=sorted(issuers.ISSUERS))
+    reparse.add_argument(
+        "--limit", type=int, default=ingest.REPROCESS_BATCH, help="attachments per pass"
+    )
+    reparse.set_defaults(func=cmd_reparse)
 
     unlock = sub.add_parser("unlock", help="retry a locked statement with a password")
     unlock.add_argument("password")

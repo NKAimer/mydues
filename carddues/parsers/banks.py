@@ -6,6 +6,10 @@ base.py does the rest. Labels listed here are tried before the defaults.
 
 from __future__ import annotations
 
+import re
+
+from ..models import ParsedStatement
+from ..text import parse_amount
 from .base import DEFAULT_LABELS, StatementParser
 
 
@@ -16,6 +20,17 @@ def _labels(**overrides: tuple[str, ...]) -> dict[str, tuple[str, ...]]:
         remaining = tuple(x for x in merged[field] if x not in preferred)
         merged[field] = preferred + remaining
     return merged
+
+
+def _amount_on_following_line(text: str, label: str) -> float | None:
+    """YES Bank puts the rupee amount on the line under the label row."""
+    pattern = re.compile(
+        rf"(?i){re.escape(label)}:[^\n]*\n\s*(Rs\.?\s*[\d,]+\.\d{{2}})"
+    )
+    match = pattern.search(text or "")
+    if not match:
+        return None
+    return parse_amount(match.group(1))
 
 
 class HdfcParser(StatementParser):
@@ -36,7 +51,9 @@ class IciciParser(StatementParser):
         total_due=("Total Amount due", "Total Amount Due"),
         min_due=("Minimum Amount due", "Minimum Amount Due"),
         due_date=("Payment Due Date", "Due Date"),
-        statement_date=("Statement Date",),
+        # Statement Date first; Statement Period is a last resort and its end
+        # day is used (see parse_statement_date).
+        statement_date=("Statement Date", "Statement Period"),
     )
 
 
@@ -109,6 +126,28 @@ class RblParser(StatementParser):
 class YesBankParser(StatementParser):
     key = "yesbank"
     issuer_key = "yesbank"
+    labels = _labels(
+        total_due=("Total Amount Due",),
+        min_due=("Minimum Amount Due",),
+        due_date=("Payment Due Date",),
+        statement_date=("Statement Date", "Statement Period"),
+        credit_limit=("Credit Limit",),
+        available_credit=("Available Credit Limit",),
+    )
+
+    def postprocess(self, statement: ParsedStatement, text: str) -> ParsedStatement:
+        # Label row mixes in Cash Limit / Points Earned; values are on the next line:
+        #   Total Amount Due: Cash Limit: Points Earned : 0
+        #   Rs. 12,255.00 Rs. 0.00
+        total = _amount_on_following_line(text, "Total Amount Due")
+        if total is not None:
+            statement.total_due = total
+            statement.matched_labels["total_due"] = "Total Amount Due"
+        minimum = _amount_on_following_line(text, "Minimum Amount Due")
+        if minimum is not None:
+            statement.min_due = minimum
+            statement.matched_labels["min_due"] = "Minimum Amount Due"
+        return statement
 
 
 class AuParser(StatementParser):

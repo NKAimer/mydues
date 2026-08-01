@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date, datetime
 
 from flask import Flask, flash, redirect, render_template, request, session, url_for
@@ -51,6 +52,23 @@ def _parse_amount(value: str | None) -> float | None:
 
 ATTENTION_SHOWN = 12
 
+# "HDFC Bank <estatement@hdfcbank.net>" → the address alone for the head line.
+_EMAIL_IN_BRACKETS = re.compile(r"<([^<>@\s]+@[^<>@\s]+)>")
+_BARE_EMAIL = re.compile(r"^[^<>@\s]+@[^<>@\s]+$")
+
+
+def _email_address(sender: str | None) -> str | None:
+    """The mailer's address, without the display name."""
+    if not sender:
+        return None
+    value = sender.strip()
+    match = _EMAIL_IN_BRACKETS.search(value)
+    if match:
+        return match.group(1)
+    if _BARE_EMAIL.match(value):
+        return value
+    return value
+
 
 def _attention(conn, limit: int = ATTENTION_SHOWN) -> list[dict]:
     """Attachments needing help, described well enough to act on.
@@ -71,8 +89,10 @@ def _attention(conn, limit: int = ATTENTION_SHOWN) -> list[dict]:
                 "detail": row["detail"],
                 "message_id": row["message_id"],
                 "sender": row["sender"],
+                "from_email": _email_address(row["sender"]),
                 "subject": row["subject"],
-                "received": received.strftime("%d %b %Y, %H:%M") if received else None,
+                # Head line uses the Indian date; the mail block repeats it.
+                "received": received.strftime("%d/%m/%Y") if received else None,
                 "issuer_name": issuer.name if issuer else None,
                 "password_rule": row["password_rule"],
                 "needs_card": bool(issuer_key) and issuer_key not in registered,
@@ -364,6 +384,36 @@ def create_app() -> Flask:
 
         message = _reopen(conn)
         flash(message or "Nothing is waiting to be opened.", "success")
+        return redirect(url_for("index"))
+
+    @app.post("/ingest/reparse")
+    def reparse_parsed():
+        """Rewrite stored cycles with the current parsers."""
+        conn = db.connect()
+        db.init(conn)
+        if not gmail.is_connected():
+            flash("Connect Gmail first so the statements can be fetched again.", "error")
+            return redirect(url_for("index"))
+
+        try:
+            summary = ingest.reparse_parsed(conn, interactive=False)
+        except Exception:  # noqa: BLE001
+            logger.exception("Reparse failed")
+            flash("Could not re-parse statements.", "error")
+            return redirect(url_for("index"))
+
+        if not summary.results:
+            flash("No parsed statements to re-read.", "success")
+        else:
+            message = f"Re-parsed {summary.parsed} of {len(summary.results)} statement(s)."
+            if summary.remaining:
+                message += f" {summary.remaining} still to re-read."
+            category = "success"
+            if summary.needs_attention:
+                category = "error" if summary.parsed == 0 else "warning"
+                first = summary.needs_attention[0]
+                message += f" {first.status}: {first.filename}: {first.detail}"
+            flash(message, category)
         return redirect(url_for("index"))
 
     @app.post("/ingest/retry")

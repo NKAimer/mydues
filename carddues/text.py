@@ -28,34 +28,86 @@ _DATE_PATTERNS = [
 ]
 DATE_RE = re.compile("|".join(f"(?:{p})" for p in _DATE_PATTERNS))
 
+# Some ICICI (Amazon Pay) PDFs paint each header letter twice, so extraction
+# yields "PPAAYYMMEENNTT DDUUEE DDAATTEE" instead of "PAYMENT DUE DATE".
+_DOUBLED_WORD = re.compile(r"[A-Za-z]{4,}")
+
+
+def undouble_glyphs(text: str) -> str:
+    """Collapse doubled letter runs: PPAAYYMMEENNTT → PAYMENT.
+
+    Card masks like XXXX are left alone — every letter is the same, which is
+    masking, not the doubled-glyph artefact.
+    """
+
+    def collapse(match: re.Match[str]) -> str:
+        word = match.group(0)
+        if len(word) % 2:
+            return word
+        chars = list(word)
+        if not all(chars[i] == chars[i + 1] for i in range(0, len(chars), 2)):
+            return word
+        collapsed = "".join(chars[::2])
+        if len(set(collapsed)) == 1:
+            return word
+        return collapsed
+
+    return _DOUBLED_WORD.sub(collapse, text)
+
 
 def normalize(text: str) -> str:
     """Collapse the ragged whitespace that PDF text extraction produces."""
     text = text.replace("\u00a0", " ").replace("\u20b9", "₹")
+    text = undouble_glyphs(text)
     text = re.sub(r"[ \t]+", " ", text)
     return re.sub(r"\n{3,}", "\n\n", text)
 
 
+def _is_reference_id(match: re.Match[str], raw: str) -> bool:
+    """True for statement numbers mistaken for money (e.g. STMT No. A25122229867)."""
+    num = match.group("num") or ""
+    if "," in num or "." in num:
+        return False
+    if len(num) >= 10:
+        return True
+    prefix = raw[max(0, match.start() - 40) : match.start()]
+    return bool(re.search(r"(?i)(?:STMT|Statement)\s*No\.?", prefix))
+
+
 def parse_amount(raw: str) -> float | None:
     """Return a signed amount. A Cr suffix means the issuer owes you."""
-    match = AMOUNT_RE.search(raw or "")
-    if not match:
-        return None
-    try:
-        value = float(match.group("num").replace(",", ""))
-    except ValueError:
-        return None
-    suffix = (match.group("suffix") or "").lower()
-    if match.group("sign") or suffix == "cr":
-        value = -value
-    return value
+    for match in AMOUNT_RE.finditer(raw or ""):
+        if _is_reference_id(match, raw or ""):
+            continue
+        try:
+            value = float(match.group("num").replace(",", ""))
+        except ValueError:
+            continue
+        suffix = (match.group("suffix") or "").lower()
+        if match.group("sign") or suffix == "cr":
+            value = -value
+        return value
+    return None
 
 
-def parse_date(raw: str, *, today: date | None = None) -> date | None:
-    match = DATE_RE.search(raw or "")
-    if not match:
-        return None
-    candidate = match.group(0).strip().rstrip(",")
+def parse_amounts(raw: str) -> list[float]:
+    """Every plausible money amount in `raw`, skipping statement/reference ids."""
+    found: list[float] = []
+    for match in AMOUNT_RE.finditer(raw or ""):
+        if _is_reference_id(match, raw or ""):
+            continue
+        try:
+            value = float(match.group("num").replace(",", ""))
+        except ValueError:
+            continue
+        suffix = (match.group("suffix") or "").lower()
+        if match.group("sign") or suffix == "cr":
+            value = -value
+        found.append(value)
+    return found
+
+
+def _coerce_date(candidate: str, *, today: date | None = None) -> date | None:
     try:
         parsed = dateparser.parse(candidate, dayfirst=True, fuzzy=False)
     except (ValueError, OverflowError):
@@ -68,6 +120,38 @@ def parse_date(raw: str, *, today: date | None = None) -> date | None:
     if result.year < reference.year - 30:
         result = result.replace(year=result.year + 100)
     return result
+
+
+def parse_date(raw: str, *, today: date | None = None) -> date | None:
+    match = DATE_RE.search(raw or "")
+    if not match:
+        return None
+    return _coerce_date(match.group(0).strip().rstrip(","), today=today)
+
+
+def parse_dates(raw: str, *, today: date | None = None) -> list[date]:
+    """Every date in `raw`, in order of appearance."""
+    found: list[date] = []
+    for match in DATE_RE.finditer(raw or ""):
+        value = _coerce_date(match.group(0).strip().rstrip(","), today=today)
+        if value is not None:
+            found.append(value)
+    return found
+
+
+def parse_statement_date(raw: str, *, label: str = "", today: date | None = None) -> date | None:
+    """A statement date, or the closing day of a statement period.
+
+    "Statement Period: June 29, 2026 to July 28, 2026" must yield July 28 (the
+    bill date), not the period start. Use the second date of the range only —
+    later transaction dates in the same window must not win.
+    """
+    dates = parse_dates(raw, today=today)
+    if not dates:
+        return None
+    if "period" in label.lower() and len(dates) >= 2:
+        return dates[1]
+    return dates[0]
 
 
 def _label_pattern(label: str) -> re.Pattern[str]:
@@ -112,11 +196,39 @@ def find_labeled_date(
     return None
 
 
-CARD_NUMBER_RE = re.compile(
-    r"(?:\d{4}|X{4}|x{4}|\*{4})[\s-]*(?:X{4}|x{4}|\*{4}|\d{4})[\s-]*(?:X{4}|x{4}|\*{4}|\d{4})[\s-]*(\d{4})"
+# Grouped masks (4321 XXXX XXXX 8765) and compact ones (652926XXXXXX2750 /
+# 4315XXXXXXXX4019). At least one masked run is required so bare account
+# numbers are not treated as cards.
+_CARD_GROUPED_RE = re.compile(
+    r"(?<!\d)(?:\d{4}|[Xx*]{4})[\s-]*[Xx*]{4}[\s-]*(?:[Xx*]{4}|\d{4})[\s-]*(\d{4})(?!\d)"
 )
+_CARD_COMPACT_RE = re.compile(r"(?<!\d)\d{4,6}[Xx*]{4,8}(\d{4})(?!\d)")
+_CARD_LABELED_RE = re.compile(
+    r"(?i)(?:credit\s*card\s*no\.?|card\s*(?:no\.?|number))\s*[:.]?\s*"
+    r"([0-9Xx*]{12,22})"
+)
+_ALTERNATE_ACCOUNT_RE = re.compile(
+    r"(?i)alternate\s+(?:account|a/?c)\s*(?:number|no\.?)?\s*:?\s*\d+"
+)
+
+# Kept for callers/tests that still import the old name.
+CARD_NUMBER_RE = _CARD_GROUPED_RE
 
 
 def find_card_last4(text: str) -> str | None:
-    match = CARD_NUMBER_RE.search(text or "")
-    return match.group(1) if match else None
+    """Last four digits of a masked credit-card number in `text`."""
+    cleaned = _ALTERNATE_ACCOUNT_RE.sub(" ", text or "")
+
+    for match in _CARD_LABELED_RE.finditer(cleaned):
+        token = match.group(1)
+        if not re.search(r"[Xx*]", token):
+            continue
+        digits = re.sub(r"\D", "", token)
+        if len(digits) >= 4:
+            return digits[-4:]
+
+    for pattern in (_CARD_COMPACT_RE, _CARD_GROUPED_RE):
+        match = pattern.search(cleaned)
+        if match:
+            return match.group(1)
+    return None

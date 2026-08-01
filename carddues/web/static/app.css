@@ -289,6 +289,12 @@ code.copyable {
 }
 .issues .issue-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
 .issues .file { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; }
+.issues .from { color: var(--text); font-size: 12px; }
+.issues .when {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
 .issues .detail { color: var(--muted); }
 .issues .retry { display: flex; gap: 6px; align-items: center; margin-top: 10px; }
 .issues .retry input { width: 200px; padding: 6px 9px; }
@@ -310,6 +316,7 @@ h2 .count { color: var(--muted); font-size: 12px; font-weight: 400; margin-left:
 .flashes { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
 .flash { padding: 10px 14px; border-radius: 10px; font-size: 13px; border: 1px solid var(--line); background: var(--surface); }
 .flash.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); color: var(--danger); }
+.flash.warning { border-color: color-mix(in srgb, var(--warn, #b58900) 45%, var(--line)); color: var(--warn, #8a6d00); }
 .flash.success { border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
 
 footer {

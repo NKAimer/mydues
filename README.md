@@ -97,6 +97,9 @@ carddues unlock 'NAVE1504' --file statement.pdf
 # Work through the backlog of waiting attachments, a batch at a time
 carddues reprocess --issuer hdfc
 
+# Re-read already-parsed PDFs after a parser fix (Fetch skips those)
+carddues reparse --issuer icici
+
 carddues show          # table in the terminal
 carddues show --json   # machine readable
 carddues log           # what the last ingest did with each attachment

@@ -11,6 +11,7 @@ from pathlib import Path
 from . import config, db, gmail, issuers, passwords, pdfdoc
 from .models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
 from .parsers import parse_statement
+from .statement_gate import is_credit_card_mail, looks_like_credit_card_statement
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,10 @@ def _resolve_card(
         return same_issuer[0] if len(same_issuer) == 1 else None
 
     if not create_missing:
+        return None
+
+    # Auto-create only when the bill looks complete enough to trust last4.
+    if statement.due_date is None and statement.min_due is None:
         return None
 
     issuer_key = statement.issuer or "other"
@@ -164,6 +169,14 @@ def ingest_pdf(
         logger.exception("Failed to read %s", path)
         return IngestResult(STATUS_ERROR, f"{type(exc).__name__}: {exc}", path.name, source_ref)
 
+    if not looks_like_credit_card_statement(extracted.text):
+        return IngestResult(
+            STATUS_SKIPPED,
+            "Not a credit card statement (ignored)",
+            path.name,
+            source_ref,
+        )
+
     statement = parse_statement(
         extracted.text, issuer_hint=issuer_hint, tables=extracted.tables
     )
@@ -184,22 +197,44 @@ class AttachmentGone(Exception):
 
 
 def _local_copy(
-    message_id: str, filename: str, *, service_for
+    message_id: str,
+    filename: str,
+    *,
+    service_for,
+    need_message: bool = False,
 ) -> tuple[Path, gmail.Message | None]:
     """The attachment on disk, fetched again when it is no longer kept.
 
-    Returns the message too when one had to be opened, since its body carries
-    the password rule and its sender identifies the issuer.
+    Returns the message too when one had to be opened, or when `need_message`
+    is set so a kept PDF can still pick up the sender and received date that
+    older log rows never recorded.
     """
     path = gmail.attachment_path(message_id, filename)
     if path.exists():
-        return path, None
+        if not need_message:
+            return path, None
+        try:
+            return path, gmail.get_message(service_for(), message_id)
+        except Exception:  # noqa: BLE001 - the PDF can still be opened without the mail
+            logger.exception("Could not load mail metadata for %s", filename)
+            return path, None
 
     message = gmail.get_message(service_for(), message_id)
     attachment = next((a for a in message.attachments if a.filename == filename), None)
     if attachment is None:
         raise AttachmentGone("That attachment is no longer in the mail")
     return gmail.download(service_for(), attachment), message
+
+
+def _mail_context_missing(conn: sqlite3.Connection, message_id: str, filename: str) -> bool:
+    """True when the log has no sender or received date to show beside the file."""
+    row = conn.execute(
+        "SELECT sender, received_at FROM ingest_log WHERE message_id = ? AND filename = ?",
+        (message_id, filename),
+    ).fetchone()
+    if row is None:
+        return True
+    return not (row["sender"] and row["received_at"])
 
 
 def _lazy_service(interactive: bool):
@@ -225,10 +260,14 @@ def retry_locked(
     """Open a statement that stayed locked, using a password you supply."""
     hint: str | None = None
     issuer_hint: str | None = None
+    service_for = _lazy_service(interactive)
 
     try:
         path, message = _local_copy(
-            message_id, filename, service_for=_lazy_service(interactive)
+            message_id,
+            filename,
+            service_for=service_for,
+            need_message=_mail_context_missing(conn, message_id, filename),
         )
     except AttachmentGone as exc:
         return IngestResult(STATUS_ERROR, str(exc), filename, message_id)
@@ -314,7 +353,12 @@ def reprocess_pending(
             continue
 
         try:
-            path, message = _local_copy(message_id, filename, service_for=service_for)
+            path, message = _local_copy(
+                message_id,
+                filename,
+                service_for=service_for,
+                need_message=not (row["sender"] and row["received_at"]),
+            )
         except gmail.GmailNotConfigured as exc:
             # Nothing else in this batch can be fetched either.
             summary.results.append(IngestResult(STATUS_ERROR, str(exc), filename, message_id))
@@ -351,6 +395,99 @@ def reprocess_pending(
     return summary
 
 
+def _log_reparse(
+    conn: sqlite3.Connection,
+    *,
+    message_id: str | None,
+    filename: str,
+    result: IngestResult,
+    message: gmail.Message | None,
+) -> None:
+    """Record a reparse outcome without demoting a previously parsed attachment.
+
+    A failed rewrite must stay in the reparse queue; overwriting status with
+    error/locked would leave the bad statement row and never try again.
+    """
+    if result.status == STATUS_PARSED:
+        _log(conn, message_id=message_id, filename=filename, result=result, message=message)
+        return
+    detail = f"Reparse {result.status}: {result.detail}"
+    kept = IngestResult(STATUS_PARSED, detail, filename, message_id)
+    _log(conn, message_id=message_id, filename=filename, result=kept, message=message)
+
+
+def reparse_parsed(
+    conn: sqlite3.Connection,
+    *,
+    issuer: str | None = None,
+    limit: int = REPROCESS_BATCH,
+    interactive: bool = False,
+) -> IngestSummary:
+    """Re-read already-parsed attachments with the current parsers.
+
+    Fetch skips anything marked parsed, so a bug fix in date extraction does
+    not rewrite stored cycles until this runs.
+    """
+    summary = IngestSummary()
+    service_for = _lazy_service(interactive)
+    # Snapshot before the pass: successes stay `parsed`, so a post-loop count
+    # would still include everything we just rewrote.
+    total_before = db.count_parsed_ingest(conn, issuer=issuer)
+
+    for row in db.parsed_ingest(conn, issuer=issuer, limit=limit):
+        message_id = row["message_id"]
+        filename = row["filename"]
+        if not (message_id and filename):
+            continue
+
+        try:
+            path, message = _local_copy(
+                message_id,
+                filename,
+                service_for=service_for,
+                need_message=True,
+            )
+        except gmail.GmailNotConfigured as exc:
+            summary.results.append(IngestResult(STATUS_ERROR, str(exc), filename, message_id))
+            break
+        except AttachmentGone as exc:
+            result = IngestResult(STATUS_ERROR, str(exc), filename, message_id)
+            summary.results.append(result)
+            _log_reparse(
+                conn, message_id=message_id, filename=filename, result=result, message=None
+            )
+            continue
+        except Exception as exc:  # noqa: BLE001 - one bad mail must not stop the pass
+            logger.exception("Could not re-download %s for reparse", filename)
+            result = IngestResult(STATUS_ERROR, f"Re-download failed: {exc}", filename, message_id)
+            summary.results.append(result)
+            _log_reparse(
+                conn, message_id=message_id, filename=filename, result=result, message=None
+            )
+            continue
+
+        result = ingest_pdf(
+            conn,
+            path,
+            issuer_hint=message.issuer_key if message else row["issuer"],
+            source_ref=message_id,
+            password_hint=message.body if message else None,
+        )
+        result.filename = filename
+        result.message_id = message_id
+        summary.results.append(result)
+        _log_reparse(
+            conn, message_id=message_id, filename=filename, result=result, message=message
+        )
+
+        # Parsed PDFs are not kept between runs; locked ones stay for unlock.
+        if result.status != STATUS_LOCKED:
+            path.unlink(missing_ok=True)
+
+    summary.remaining = max(0, total_before - len(summary.results))
+    return summary
+
+
 def ingest_gmail(
     conn: sqlite3.Connection,
     *,
@@ -371,8 +508,18 @@ def ingest_gmail(
 
     for message_id in message_ids:
         message = gmail.get_message(service, message_id)
+        if not is_credit_card_mail(subject=message.subject):
+            logger.info("Skipping non-card mail %s (%s)", message_id, message.subject)
+            continue
         for attachment in message.attachments:
             if (message_id, attachment.filename) in already_seen:
+                continue
+            if not is_credit_card_mail(subject=message.subject, filename=attachment.filename):
+                logger.info(
+                    "Skipping non-card attachment %s (%s)",
+                    attachment.filename,
+                    message.subject,
+                )
                 continue
 
             try:

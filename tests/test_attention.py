@@ -49,10 +49,28 @@ def test_the_mail_is_described_when_no_card_is_registered(client, conn):
 
     assert "estatement@hdfcbank.net" in page
     assert "Your HDFC Bank Credit Card Statement - Jul 2026" in page
-    assert "28 Jul 2026, 06:15" in page
+    assert "28/07/2026" in page
     assert "first 4 letters of your name in CAPITAL letters" in page
     assert "add the HDFC Bank card with the cardholder" in page
     assert 'name="password"' in page
+
+
+def test_the_head_line_shows_the_mailer_address_and_date(client, conn):
+    log_locked(conn)
+
+    page = client.get("/").get_data(as_text=True)
+
+    assert 'class="from">estatement@hdfcbank.net</span>' in page
+    assert 'class="when">28/07/2026</span>' in page
+
+
+def test_email_address_strips_the_display_name():
+    from carddues.web.app import _email_address
+
+    assert _email_address("HDFC Bank <estatement@hdfcbank.net>") == "estatement@hdfcbank.net"
+    assert _email_address("cbssbi.cas@alerts.sbi.co.in") == "cbssbi.cas@alerts.sbi.co.in"
+    assert _email_address(None) is None
+    assert _email_address("") is None
 
 
 def test_the_nudge_goes_away_once_the_card_is_registered(client, conn):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from ..models import ParsedStatement
+from ..statement_gate import looks_like_credit_card_statement
 from .banks import (
     AmexParser,
     AuParser,
@@ -55,6 +56,8 @@ def parse_statement(
     items are when a statement draws them.
     """
     if not text:
+        return None
+    if not looks_like_credit_card_statement(text):
         return None
 
     statement = _summary(text, issuer_hint=issuer_hint)

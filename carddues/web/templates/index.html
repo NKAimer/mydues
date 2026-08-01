@@ -19,6 +19,9 @@
         <form method="post" action="{{ url_for('run_ingest') }}">
           <button class="btn primary" type="submit">Fetch from Gmail</button>
         </form>
+        <form method="post" action="{{ url_for('reparse_parsed') }}">
+          <button class="btn" type="submit">Re-parse statements</button>
+        </form>
         <form method="post" action="{{ url_for('auth_disconnect') }}">
           <button class="btn subtle" type="submit">Disconnect Gmail</button>
         </form>
@@ -308,6 +311,8 @@
             <div class="issue-head">
               <span class="badge {{ item.status }}">{{ item.status }}</span>
               <span class="file">{{ item.filename }}</span>
+              {% if item.from_email %}<span class="from">{{ item.from_email }}</span>{% endif %}
+              {% if item.received %}<span class="when">{{ item.received }}</span>{% endif %}
               <span class="detail">{{ item.detail }}</span>
             </div>
 
