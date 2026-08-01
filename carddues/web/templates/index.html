@@ -17,13 +17,6 @@
     <div class="masthead-actions">
       {% if tab == 'expenses' %}
         {% if gmail_connected %}
-          <form method="post" action="{{ url_for('fetch_expenses') }}" class="js-progress-form expense-fetch" data-job="expenses" data-title="Fetching expense alerts">
-            <label class="days-field">Last
-              <input type="number" name="days" value="7" min="1" max="400" inputmode="numeric" required>
-              days
-            </label>
-            <button class="btn primary" type="submit">Fetch expense alerts</button>
-          </form>
           <form method="post" action="{{ url_for('refresh_expenses') }}">
             <button class="btn subtle" type="submit">Refresh descriptions from Gmail</button>
           </form>
@@ -43,9 +36,6 @@
         {% endif %}
       {% else %}
         {% if gmail_connected %}
-          <form method="post" action="{{ url_for('run_ingest') }}" class="js-progress-form" data-job="fetch" data-title="Fetching statements">
-            <button class="btn primary" type="submit">Fetch from Gmail</button>
-          </form>
           <form method="post" action="{{ url_for('reparse_parsed') }}" class="js-progress-form" data-job="reparse" data-title="Re-parsing statements">
             <button class="btn" type="submit">Re-parse statements</button>
           </form>
@@ -79,6 +69,20 @@
   </nav>
 
   {% if tab == 'expenses' %}
+
+  {% if gmail_connected %}
+  <section class="panel expense-fetch-panel">
+    <h2>Fetch expense alerts</h2>
+    <p class="sub">Pull spend alerts from Gmail for the lookback window below.</p>
+    <form method="post" action="{{ url_for('fetch_expenses') }}" class="js-progress-form expense-fetch" data-job="expenses" data-title="Fetching expense alerts">
+      <label class="days-field">Look back
+        <input type="number" name="days" value="7" min="1" max="400" inputmode="numeric" required aria-label="Number of days to look back">
+        days
+      </label>
+      <button class="btn primary" type="submit">Fetch from Gmail</button>
+    </form>
+  </section>
+  {% endif %}
 
   <section class="summary">
     <div class="stat">
@@ -319,6 +323,20 @@
   </section>
 
   {% else %}
+
+  {% if gmail_connected %}
+  <section class="panel expense-fetch-panel">
+    <h2>Fetch statements</h2>
+    <p class="sub">Pull credit-card statement PDFs from Gmail for the lookback window below.</p>
+    <form method="post" action="{{ url_for('run_ingest') }}" class="js-progress-form expense-fetch" data-job="fetch" data-title="Fetching statements">
+      <label class="days-field">Look back
+        <input type="number" name="months" value="1" min="1" max="24" inputmode="numeric" required aria-label="Number of months to look back">
+        months
+      </label>
+      <button class="btn primary" type="submit">Fetch from Gmail</button>
+    </form>
+  </section>
+  {% endif %}
 
   {% if not gmail_connected %}
     <section class="panel setup">

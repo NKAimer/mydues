@@ -70,15 +70,27 @@ class Message:
         return datetime.fromtimestamp(self.internal_date / 1000)
 
 
-def build_query(lookback_days: int = config.DEFAULT_LOOKBACK_DAYS) -> str:
-    """Gmail search for statement mails with PDF attachments."""
+def build_query(
+    lookback_days: int = config.DEFAULT_LOOKBACK_DAYS,
+    *,
+    lookback_months: int | None = None,
+) -> str:
+    """Gmail search for statement mails with PDF attachments.
+
+    Prefer ``lookback_months`` (Gmail ``newer_than:Nm``) when set; otherwise
+    fall back to ``lookback_days``.
+    """
     from .statement_gate import GMAIL_SUBJECT_EXCLUSIONS
 
     senders = " OR ".join(f"from:{domain}" for domain in issuers.all_senders())
     subjects = " OR ".join(f'subject:"{hint}"' for hint in issuers.STATEMENT_SUBJECT_HINTS)
     excluded = " ".join(f'-subject:"{token}"' for token in GMAIL_SUBJECT_EXCLUSIONS)
+    if lookback_months is not None:
+        newer = f"newer_than:{int(lookback_months)}m"
+    else:
+        newer = f"newer_than:{int(lookback_days)}d"
     return (
-        f"has:attachment filename:pdf newer_than:{lookback_days}d "
+        f"has:attachment filename:pdf {newer} "
         f"(({senders}) OR ({subjects})) {excluded}"
     ).strip()
 

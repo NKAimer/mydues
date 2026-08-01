@@ -688,6 +688,7 @@ def ingest_gmail(
     conn: sqlite3.Connection,
     *,
     lookback_days: int = config.DEFAULT_LOOKBACK_DAYS,
+    lookback_months: int | None = None,
     limit: int = 100,
     interactive: bool = True,
     keep_files: bool = False,
@@ -697,7 +698,9 @@ def ingest_gmail(
     """Search Gmail for statement mails and ingest every PDF attachment."""
     summary = IngestSummary()
     service = gmail.service(interactive=interactive)
-    search_query = query or gmail.build_query(lookback_days)
+    search_query = query or gmail.build_query(
+        lookback_days, lookback_months=lookback_months
+    )
     logger.info("Gmail query: %s", search_query)
 
     message_ids = gmail.search(service, search_query, max_results=limit)

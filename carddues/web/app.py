@@ -158,6 +158,15 @@ def _parse_lookback_days(value: str | None, *, default: int = 7) -> int:
     return max(1, min(days, 400))
 
 
+def _parse_lookback_months(value: str | None, *, default: int = 1) -> int:
+    """Positive month count for statement Gmail search; clamps to 1..24."""
+    try:
+        months = int((value or "").strip())
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(months, 24))
+
+
 def _parse_month(value: str | None) -> date:
     """First day of YYYY-MM, or the current month."""
     today = date.today()
@@ -466,8 +475,11 @@ def create_app() -> Flask:
     def run_ingest():
         conn = db.connect()
         db.init(conn)
+        lookback_months = _parse_lookback_months(request.form.get("months"))
         try:
-            summary = ingest.ingest_gmail(conn, interactive=False)
+            summary = ingest.ingest_gmail(
+                conn, interactive=False, lookback_months=lookback_months
+            )
         except gmail.GmailNotConfigured as exc:
             flash(f"{exc}", "error")
             return redirect(url_for("index"))
@@ -479,6 +491,11 @@ def create_app() -> Flask:
         message = f"Parsed {summary.parsed} statement(s)."
         if summary.needs_attention:
             message += f" {len(summary.needs_attention)} attachment(s) need attention."
+        message += (
+            f" (last {lookback_months} month"
+            + ("s" if lookback_months != 1 else "")
+            + ")"
+        )
         flash(message, "success")
         return redirect(url_for("index"))
 
@@ -488,6 +505,9 @@ def create_app() -> Flask:
         job = (request.args.get("job") or "").strip()
         if job not in {"fetch", "reparse", "reprocess", "expenses"}:
             return Response("Unknown job", status=400)
+        # Capture before the background thread — request context is gone there.
+        expense_lookback_days = _parse_lookback_days(request.args.get("days"))
+        statement_lookback_months = _parse_lookback_months(request.args.get("months"))
 
         def event_stream():
             import json
@@ -514,13 +534,21 @@ def create_app() -> Flask:
                     db.init(conn)
                     if job == "fetch":
                         summary = ingest.ingest_gmail(
-                            conn, interactive=False, on_progress=on_progress
+                            conn,
+                            interactive=False,
+                            lookback_months=statement_lookback_months,
+                            on_progress=on_progress,
                         )
                         message = f"Parsed {summary.parsed} statement(s)."
                         if summary.needs_attention:
                             message += (
                                 f" {len(summary.needs_attention)} attachment(s) need attention."
                             )
+                        message += (
+                            f" (last {statement_lookback_months} month"
+                            + ("s" if statement_lookback_months != 1 else "")
+                            + ")"
+                        )
                         done_total = len(summary.results)
                         done_parsed = summary.parsed
                         done_remaining = summary.remaining
@@ -549,16 +577,18 @@ def create_app() -> Flask:
                             raise gmail.GmailNotConfigured(
                                 "Connect Gmail first so expense alerts can be fetched."
                             )
-                        lookback_days = _parse_lookback_days(request.args.get("days"))
                         summary = expense_ingest.ingest_expense_alerts(
                             conn,
                             interactive=False,
-                            lookback_days=lookback_days,
+                            lookback_days=expense_lookback_days,
                             on_progress=on_progress,
                         )
                         message = (
                             f"Added {summary.added} expense(s) from Gmail"
                             + (f"; skipped {summary.skipped}." if summary.skipped else ".")
+                            + f" (last {expense_lookback_days} day"
+                            + ("s" if expense_lookback_days != 1 else "")
+                            + ")"
                         )
                         done_total = len(summary.results)
                         done_parsed = summary.added

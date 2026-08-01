@@ -34,10 +34,18 @@
     });
 
     let url = "/ingest/stream?job=" + encodeURIComponent(job);
-    if (job === "expenses" && form) {
-      const daysInput = form.querySelector('input[name="days"]');
-      if (daysInput && daysInput.value) {
-        url += "&days=" + encodeURIComponent(daysInput.value);
+    if (form) {
+      if (job === "expenses") {
+        const daysInput = form.querySelector('input[name="days"]');
+        if (daysInput && daysInput.value) {
+          url += "&days=" + encodeURIComponent(daysInput.value);
+        }
+      }
+      if (job === "fetch") {
+        const monthsInput = form.querySelector('input[name="months"]');
+        if (monthsInput && monthsInput.value) {
+          url += "&months=" + encodeURIComponent(monthsInput.value);
+        }
       }
     }
     const source = new EventSource(url);

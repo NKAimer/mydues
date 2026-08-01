@@ -88,6 +88,13 @@ def test_gmail_query_excludes_demat_subjects():
     query = gmail.build_query(30)
     assert "-subject:\"demat\"" in query
     assert "credit card statement" in query
+    assert "newer_than:30d" in query
+
+
+def test_gmail_query_supports_month_lookback():
+    query = gmail.build_query(lookback_months=1)
+    assert "newer_than:1m" in query
+    assert "newer_than:1d" not in query
 
 
 def test_store_does_not_auto_create_card_without_due_fields(conn):

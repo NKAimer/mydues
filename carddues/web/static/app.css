@@ -418,26 +418,32 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 
 a.btn { display: inline-block; text-decoration: none; }
 
 .masthead-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.expense-fetch-panel .expense-fetch {
+  margin-top: 12px;
+}
 .expense-fetch {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 .days-field {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 13px;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 560;
 }
 .days-field input {
   width: 4.5rem;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--surface-2);
   color: var(--text);
   font: inherit;
+  font-variant-numeric: tabular-nums;
 }
 
 .setup { margin-top: 0; margin-bottom: 24px; border-color: var(--accent); }

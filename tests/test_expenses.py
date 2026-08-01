@@ -332,11 +332,12 @@ def test_expenses_tab_shows_refresh_affordance(client, monkeypatch):
     assert "Refresh descriptions from Gmail" in page
     assert 'name="days"' in page
     assert 'value="7"' in page
-    assert "Fetch expense alerts" in page
+    assert "Fetch expense alerts" in page or "Fetch from Gmail" in page
+    assert "Look back" in page
 
 
 def test_parse_lookback_days_defaults_and_clamps():
-    from carddues.web.app import _parse_lookback_days
+    from carddues.web.app import _parse_lookback_days, _parse_lookback_months
 
     assert _parse_lookback_days(None) == 7
     assert _parse_lookback_days("") == 7
@@ -344,6 +345,10 @@ def test_parse_lookback_days_defaults_and_clamps():
     assert _parse_lookback_days("0") == 1
     assert _parse_lookback_days("9999") == 400
     assert _parse_lookback_days("nope") == 7
+    assert _parse_lookback_months(None) == 1
+    assert _parse_lookback_months("3") == 3
+    assert _parse_lookback_months("0") == 1
+    assert _parse_lookback_months("99") == 24
 
 
 def test_expenses_tab_and_manual_add(client, conn):

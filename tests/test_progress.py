@@ -138,6 +138,61 @@ def test_ingest_stream_rejects_unknown_job(client, conn):
     assert response.status_code == 400
 
 
+def test_expense_stream_uses_lookback_days_without_request_context_error(
+    client, conn, monkeypatch
+):
+    from carddues import expense_ingest
+    from carddues.expense_ingest import ExpenseIngestSummary
+
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+    captured: dict = {}
+
+    def fake_ingest(conn, **kwargs):
+        captured["lookback_days"] = kwargs.get("lookback_days")
+        return ExpenseIngestSummary(added=0, skipped=2)
+
+    monkeypatch.setattr(expense_ingest, "ingest_expense_alerts", fake_ingest)
+
+    response = client.get("/ingest/stream?job=expenses&days=1")
+    assert response.status_code == 200
+    body = b"".join(response.response).decode()
+    assert "Working outside of request context" not in body
+    assert '"type": "done"' in body
+    assert captured["lookback_days"] == 1
+    assert "last 1 day" in body
+
+
+def test_statement_stream_uses_lookback_months(client, conn, monkeypatch):
+    from carddues import ingest as ingest_mod
+    from carddues.ingest import IngestSummary
+
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+    captured: dict = {}
+
+    def fake_ingest(conn, **kwargs):
+        captured["lookback_months"] = kwargs.get("lookback_months")
+        return IngestSummary()
+
+    monkeypatch.setattr(ingest_mod, "ingest_gmail", fake_ingest)
+
+    response = client.get("/ingest/stream?job=fetch&months=1")
+    assert response.status_code == 200
+    body = b"".join(response.response).decode()
+    assert "Working outside of request context" not in body
+    assert '"type": "done"' in body
+    assert captured["lookback_months"] == 1
+    assert "last 1 month" in body
+
+
+def test_cards_tab_shows_statement_months_lookback(client, monkeypatch):
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+    page = client.get("/?tab=cards").get_data(as_text=True)
+    assert "Fetch statements" in page
+    assert 'name="months"' in page
+    assert 'value="1"' in page
+    assert "Fetch from Gmail" in page
+
+
 def test_dashboard_wires_progress_forms_when_gmail_connected(client, conn, monkeypatch):
     monkeypatch.setattr(gmail, "is_connected", lambda: True)
     page = client.get("/").get_data(as_text=True)

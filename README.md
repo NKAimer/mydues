@@ -134,7 +134,8 @@ in [RESTART.md](RESTART.md).
 Nothing is sent anywhere except Google's OAuth and Gmail APIs for mail you already
 own. This project never asks for net banking credentials and does no screen scraping.
 
-Tunables in code (not env vars): statement lookback defaults to **400 days**;
+Tunables in code (not env vars): statement lookback defaults to **1 month** on
+the dashboard (overridable; CLI still defaults to **400 days** via `--days`);
 expense-alert lookback defaults to **7 days** (overridable on Fetch); a statement older than **40 days**
 is treated as stale.
 
@@ -164,7 +165,8 @@ Three tabs:
   **Statement total** (`total_due` for the cycle being viewed — latest by
   default), not credit limit; credit limit remains editable in the set form and
   still feeds the portfolio utilisation tile when known
-- **Fetch from Gmail** / **Re-parse statements** when connected
+- **Fetch from Gmail** (default lookback **1 month**, editable on the Cards
+  tab) / **Re-parse statements** when connected
 
 ### Expenses
 
