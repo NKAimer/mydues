@@ -252,8 +252,13 @@ def all_views(
 
 
 def _sort_key(view: DueView) -> tuple:
-    """Newest statement date first; undated cards last; label as tie-breaker."""
-    statement_date = view.statement_date or date.min
+    """Newest statement date first; undated cards last; label as tie-breaker.
+
+    Uses the card's latest cycle in history so viewing an older statement does
+    not move the tile.
+    """
+    newest = latest_record(view.history)
+    statement_date = (newest.statement_date if newest else None) or date.min
     return (-statement_date.toordinal(), view.card.label.lower())
 
 

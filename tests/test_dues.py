@@ -25,7 +25,7 @@ def add_record(conn, card, **kwargs):
         min_due=kwargs.pop("min_due", 2250.0),
         **kwargs,
     )
-    db.save_statement(conn, record)
+    record.id = db.save_statement(conn, record)
     return record
 
 
@@ -175,7 +175,17 @@ def test_portfolio_orders_cards_by_statement_date_newest_first(conn):
     newer = make_card(conn, label="Newer Card", last4="2222")
     undated = make_card(conn, label="No Statement", last4="3333")
     add_record(conn, older, statement_date=date(2026, 7, 5))
-    add_record(conn, newer, statement_date=date(2026, 7, 20))
+    older_cycle = add_record(conn, newer, statement_date=date(2026, 7, 5), total_due=1000.0)
+    add_record(conn, newer, statement_date=date(2026, 7, 20), total_due=2000.0)
 
     book = dues.portfolio(conn, today=TODAY)
     assert [v.card.last4 for v in book.views] == ["2222", "1111", "3333"]
+
+    # Viewing an older cycle must not reorder the tile list.
+    looking_back = dues.portfolio(
+        conn, today=TODAY, selected={newer.id: older_cycle.id}
+    )
+    assert [v.card.last4 for v in looking_back.views] == ["2222", "1111", "3333"]
+    viewed = next(v for v in looking_back.views if v.card.id == newer.id)
+    assert viewed.statement_date == date(2026, 7, 5)
+    assert not viewed.is_latest
