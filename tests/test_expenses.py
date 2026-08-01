@@ -232,6 +232,43 @@ def test_parse_alert_skips_loan_offers():
     )
 
 
+def test_parse_alert_skips_imps_and_neft_transfers():
+    assert (
+        expense_ingest.parse_alert_email(
+            subject="IMPS Transaction Alert: INR 5000.00 debited",
+            body=(
+                "Rs. 5000.00 has been debited from your Account XXXX1234 via IMPS "
+                "towards JOHN DOE on 01-08-2026."
+            ),
+            received_at=datetime(2026, 8, 1, 12, 0),
+        )
+        is None
+    )
+    assert (
+        expense_ingest.parse_alert_email(
+            subject="NEFT Alert from your bank",
+            body=(
+                "Dear Customer, Rs. 12,500.00 has been debited from A/c XX5678 "
+                "towards RENT PAYMENT via NEFT on 01-08-2026."
+            ),
+            received_at=datetime(2026, 8, 1, 12, 0),
+        )
+        is None
+    )
+    # Generic debit subject; transfer type only in the body.
+    assert (
+        expense_ingest.parse_alert_email(
+            subject="Transaction Alert: INR 2000.00 debited",
+            body=(
+                "Rs. 2000.00 has been debited from your savings account via IMPS "
+                "to BENEFICIARY NAME on 01-08-2026. Ref No. 123456."
+            ),
+            received_at=datetime(2026, 8, 1, 12, 0),
+        )
+        is None
+    )
+
+
 def test_alert_query_requires_transaction_subjects_and_skips_loans():
     query = expense_ingest.build_alert_query(7)
     assert "newer_than:7d" in query
@@ -243,6 +280,8 @@ def test_alert_query_requires_transaction_subjects_and_skips_loans():
     assert 'subject:"payment was made using your credit card"' in query
     assert '-subject:"loan"' in query
     assert '-subject:"pre-approved"' in query
+    assert '-subject:"imps"' in query
+    assert '-subject:"neft"' in query
     assert "from:(" in query
     assert "hdfcbank.bank.in" in query or "hdfcbank.com" in query
     assert "sbicard.com" in query

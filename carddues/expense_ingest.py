@@ -74,6 +74,12 @@ LOAN_OFFER_SUBJECT_SKIP = (
     "credit limit enhancement",
 )
 
+# Bank fund-transfer alerts (not card / merchant spend).
+TRANSFER_SUBJECT_SKIP = (
+    "imps",
+    "neft",
+)
+
 _LOAN_OFFER_RE = re.compile(
     r"(?i)\b(?:"
     r"personal\s+loan"
@@ -88,6 +94,8 @@ _LOAN_OFFER_RE = re.compile(
     r"|cash\s+loan"
     r")\b"
 )
+
+_TRANSFER_TYPE_RE = re.compile(r"(?i)\b(?:imps|neft)\b")
 
 # Tokens Gmail can match in subject/body for issuer-domain alerts (bank-agnostic).
 SPEND_SEARCH_TOKENS = (
@@ -241,7 +249,11 @@ def build_alert_query(lookback_days: int = 7) -> str:
     sender_branch = f"(from:({domains}) ({spend}))"
     skip = " ".join(
         f'-subject:"{token}"'
-        for token in (*STATEMENT_SUBJECT_SKIP, *LOAN_OFFER_SUBJECT_SKIP)
+        for token in (
+            *STATEMENT_SUBJECT_SKIP,
+            *LOAN_OFFER_SUBJECT_SKIP,
+            *TRANSFER_SUBJECT_SKIP,
+        )
     )
     return (
         f"newer_than:{lookback_days}d -has:attachment "
@@ -426,10 +438,14 @@ def parse_alert_email(
         return None
     if any(token in subject_l for token in LOAN_OFFER_SUBJECT_SKIP):
         return None
+    if any(token in subject_l for token in TRANSFER_SUBJECT_SKIP):
+        return None
 
     body_plain = _strip_html(body)
     blob = f"{subject}\n{body_plain}"
     if _LOAN_OFFER_RE.search(blob):
+        return None
+    if _TRANSFER_TYPE_RE.search(blob):
         return None
 
     # Prefer debit-style alerts; skip pure credit/refund wording when no debit cue.

@@ -175,9 +175,9 @@ Separate from statement PDFs so dues Fetch never double-counts alert mail.
 - Monthly ledger of amounts from bank / UPI **transaction alert** emails.
   Discovery uses **subject hints** (UPI apps, common alert titles) **or** mail
   from known **issuer domains** that mention spend cues (`Rs.`, `debited`,
-  `spent`, `UPI`, …). Statement and loan-offer subjects are skipped; parsing
-  reads amount, date, and merchant from the body with bank-agnostic patterns
-  rather than per-bank subject rules alone
+  `spent`, `UPI`, …). Statement, loan-offer, and bank fund-transfer (IMPS /
+  NEFT) alerts are skipped; parsing reads amount, date, and merchant from the
+  body with bank-agnostic patterns rather than per-bank subject rules alone
 - **Fetch expense alerts** (default lookback **7 days**, editable on the button
   row) and **Refresh descriptions from Gmail**
 - Add / edit / delete expenses by hand; **Show email** for Gmail-sourced rows
