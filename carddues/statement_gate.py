@@ -18,6 +18,9 @@ _HARD_NON_CARD_RE = re.compile(
     r"|consolidated\s+account\s+statement"
     r"|loan\s+account\s+statement"
     r"|home\s+loan\s+statement"
+    r"|statement of transactions in savings"
+    r"|savings\s+a/?c\b"
+    r"|current\s+account\s+statement"
     r")\b"
 )
 
@@ -60,6 +63,12 @@ GMAIL_SUBJECT_EXCLUSIONS = (
     "consolidated account statement",
 )
 
+# Savings / current-account e-statements share bank senders with card mail.
+_SAVINGS_MAIL_RE = re.compile(
+    r"(?i)(?:bank statement from|statement of transactions in savings"
+    r"|savings\s+a/?c\b|for your\s+(?:savings|current)\s+account)"
+)
+
 
 def _normalize_filename(filename: str) -> str:
     return re.sub(r"[_\s]+", " ", filename or "")
@@ -89,5 +98,8 @@ def is_credit_card_mail(*, subject: str = "", filename: str = "") -> bool:
     if _HARD_NON_CARD_RE.search(blob):
         return False
     if _SOFT_TITLE_RE.search(blob):
+        return False
+    # "ICICI Bank Statement from … for XXXX5705" is a savings e-statement.
+    if _SAVINGS_MAIL_RE.search(blob) and not re.search(r"(?i)credit\s+card", blob):
         return False
     return True

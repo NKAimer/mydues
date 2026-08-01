@@ -320,22 +320,36 @@ Available Credit 2,31,550.00
 
 # Live Jul-2026 layout: Net Outstanding must not beat Total Payment Due;
 # Minimal payment due; period end is the bill date; 43xx…7672 last4.
+# Transaction lines use compact DDMMM dates (25JUN) with optional CR.
 HSBC_LIVE_JULY = """
 HSBC LIVE+ CREDIT CARD Statement
 MR NAVEEN KUMAR
 43xx xxxx xxxx 7672
 
-Statement Period Payment Due Date
-23 Jun 2026 22 Jul 2026 11 Aug 2026
+PAYMENT SUMMARY
+Payment due date Minimal payment due ( )
+06 AUG 2026 202.53
 
-Total Payment Due Minimal Payment Due
-20,252.96 202.53
+XXXXXXXXXXX Statement period Total payment due ( )
+XXXXXXXXXXX 23 JUN 2026 To 22 JUL 2026 20,252.96
 
-Net Outstanding balance
-17,367.28
+Credit limit ( ) Cash limit ( )*
+100,000.00 20,000.00
+Available Credit Limit 79,747.04
 
-Credit Limit Available Credit Limit
-2,15,000.00 1,94,747.04
+DATE TRANSACTION DETAILS AMOUNTS ( )
+OPENING BALANCE 17,367.28
+30JUN BBPS PMT BBPSDP016181185431LHnWAo 17,367.28 CR
+PURCHASES & INSTALLMENTS
+23JUN CASHBACK CREDIT 1,110.00 CR
+25JUN MW KPN FF 3072 WHITEFIELD BANGALORE 594.92
+25JUN Zepto Marketplace Priv Bangalore IN 2,858.00
+02JUL MW THE PIZZA BAKERY BANGALORE 956.00
+22JUL NET OUTSTANDING BALANCE 20,252.96
+
+ACCOUNT SUMMARY
+Opening balance ( ) Purchase & other charges ( ) Payment & other credits ( ) Net Outstanding balance ( )
+17,367.28 21,362.96 18,477.28 20,252.96
 """
 
 HSBC_MITC = """
@@ -345,6 +359,29 @@ Credit Limit 5
 Payment Due Date 13 Dec 1300
 Total Amount Due 21,500.00
 Minimum Amount Due 1,000.00
+"""
+
+# Swiggy HDFC: Credit Card No. is 6527; alternate account digits must not become 2476.
+HDFC_SWIGGY_ALTERNATE = """
+Swiggy HDFC Bank Credit Card Statement
+Naveen Kumar Credit Card No. 526873XXXXXX6527
+RA Alternate Account Number 0001010610012476521
+Statement Date 20 Feb, 2026
+Total Amount Due 4,551.00
+Minimum Due 0.00
+"""
+
+# Savings-account e-statement: marketing mentions credit cards; must not become a card.
+ICICI_SAVINGS_ESTATEMENT = """
+STATEMENT SUMMARY for Customer ID: XXXXX0018 in INR as on June 30, 2026.
+Savings A/c XXXXXXXX5705 35,893.68 Registered
+Statement of Transactions in Savings Account XXXXXXXX5705 in INR for the period June 01, 2026 - June 30, 2026
+on ICICI Bank Credit Cards, Debit Cards
+& Net Banking.
+Closing Balance 208.00
+DEPOSITORY
+LTD-0001IN30302868125795-00012050001396-HDFC00
+08-06-2026 UPI payment 122.23
 """
 
 # SBI PhonePe / Cashback often print only the last two digits.

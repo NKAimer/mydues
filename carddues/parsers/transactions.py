@@ -214,6 +214,7 @@ _LETTERS = re.compile(r"[A-Za-z]{2,}")
 # Totals and balances sit in the same grid as the transactions but are not any.
 _SUMMARY = re.compile(
     r"^(sub\s*)?total\b|^grand\s+total|^(opening|closing|previous|net)\s+balance"
+    r"|^net\s+outstanding|^total\s+(?:purchase|cash|loan|balance\s+transfer)\s+outstanding"
     r"|^balance\b|^amount\s+due",
     re.IGNORECASE,
 )

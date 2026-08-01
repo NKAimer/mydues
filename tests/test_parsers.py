@@ -199,8 +199,25 @@ def test_hsbc_live_prefers_total_payment_due_over_net_outstanding():
     assert result.total_due == pytest.approx(20252.96)
     assert result.min_due == pytest.approx(202.53)
     assert result.statement_date == date(2026, 7, 22)
-    assert result.due_date == date(2026, 8, 11)
+    assert result.due_date == date(2026, 8, 6)
     assert result.total_due != pytest.approx(17367.28)
+
+
+def test_hsbc_live_extracts_ddmmm_transactions():
+    from carddues.parsers.transactions import extract_transactions
+    from carddues.text import normalize
+
+    rows = extract_transactions(normalize(fixtures.HSBC_LIVE_JULY))
+    descriptions = [txn.description for txn in rows]
+    assert "BBPS PMT BBPSDP016181185431LHnWAo" in descriptions
+    assert "MW KPN FF 3072 WHITEFIELD BANGALORE" in descriptions
+    assert "Zepto Marketplace Priv Bangalore IN" in descriptions
+    assert not any("OUTSTANDING" in d.upper() for d in descriptions)
+    assert not any("OPENING BALANCE" in d.upper() for d in descriptions)
+    payment = next(txn for txn in rows if "BBPS" in txn.description)
+    assert payment.is_credit
+    assert payment.amount == pytest.approx(17367.28)
+    assert payment.txn_date == date(2026, 6, 30)
 
 
 def test_sbi_partial_tail_is_exposed_for_card_matching():

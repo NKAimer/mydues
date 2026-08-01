@@ -115,10 +115,16 @@ def init(conn: sqlite3.Connection) -> None:
             if column not in present:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
     conn.commit()
-    # Parser once mistook an HDFC alternate account number for last4 0722.
+    # Parser once mistook an HDFC alternate account number for last4 0722 / 2476.
     retarget_card_last4(conn, issuer="hdfc", from_last4="0722", to_last4="2750")
+    retarget_card_last4(conn, issuer="hdfc", from_last4="2476", to_last4="6527")
     # ICICI demat e-statement was once auto-registered as HDFC ••1189.
     purge_false_card(conn, issuer="hdfc", last4="1189")
+    # ICICI savings e-statement was once auto-registered as ICICI ••0001.
+    purge_false_card(conn, issuer="icici", last4="0001")
+    # Drop fixture/test rows that once shadowed a live Axis cycle.
+    conn.execute("DELETE FROM statements WHERE source_ref = 'test'")
+    conn.commit()
 
 
 def _iso(value: date | datetime | None) -> str | None:

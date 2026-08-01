@@ -2,6 +2,8 @@
 
 from datetime import date, datetime
 
+import pytest
+
 from carddues import db, gmail, ingest
 from carddues.models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
 from carddues.parsers import parse_statement
@@ -19,6 +21,11 @@ def test_demat_text_is_not_a_credit_card_statement():
     assert not looks_like_credit_card_statement(fixtures.ICICI_DEMAT_ESTATEMENT)
 
 
+def test_savings_estatement_is_not_a_credit_card_statement():
+    assert not looks_like_credit_card_statement(fixtures.ICICI_SAVINGS_ESTATEMENT)
+    assert parse(fixtures.ICICI_SAVINGS_ESTATEMENT, issuer_hint="icici") is None
+
+
 def test_demat_pdf_is_not_parsed_as_a_card_bill():
     assert parse(fixtures.ICICI_DEMAT_ESTATEMENT, issuer_hint="icici") is None
 
@@ -31,6 +38,8 @@ def test_real_issuer_fixtures_still_look_like_card_bills():
         fixtures.AXIS_INLINE,
         fixtures.AXIS_PAYMENT_SUMMARY,
         fixtures.AMEX_INLINE,
+        fixtures.HSBC_LIVE_JULY,
+        fixtures.HDFC_SWIGGY_ALTERNATE,
     ):
         assert looks_like_credit_card_statement(raw)
         assert parse(raw) is not None
@@ -42,6 +51,15 @@ def test_demat_mail_subject_is_skipped():
     )
     assert is_credit_card_mail(
         subject="Amazon Pay ICICI Bank Credit Card Statement for the period June 29, 2026"
+    )
+
+
+def test_savings_mail_subject_is_skipped():
+    assert not is_credit_card_mail(
+        subject="ICICI Bank Statement from June 01, 2026 to June 30, 2026 for XXXXXXXX5705"
+    )
+    assert is_credit_card_mail(
+        subject="ICICI Bank Credit Card Statement for the period June 26 2026 to July 25 2026"
     )
 
 
@@ -106,3 +124,46 @@ def test_init_purges_phantom_hdfc_1189(conn):
     db.init(conn)
 
     assert db.find_card(conn, issuer="hdfc", last4="1189") is None
+
+
+def test_init_retargets_hdfc_2476_and_purges_icici_0001(conn):
+    swiggy = Card(issuer="hdfc", label="HDFC Bank ••6527", last4="6527")
+    swiggy.id = db.add_card(conn, swiggy)
+    bogus = Card(issuer="hdfc", label="HDFC Bank ••2476", last4="2476")
+    bogus.id = db.add_card(conn, bogus)
+    db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=bogus.id,
+            total_due=4551.0,
+            source=SOURCE_STATEMENT,
+            source_ref="msg-swiggy",
+            as_of=datetime(2026, 8, 1, 1, 13),
+            statement_date=date(2026, 2, 20),
+            parser="hdfc",
+        ),
+    )
+    savings = Card(issuer="icici", label="ICICI Bank ••0001", last4="0001")
+    savings.id = db.add_card(conn, savings)
+
+    db.init(conn)
+
+    assert db.find_card(conn, issuer="hdfc", last4="2476") is None
+    assert db.find_card(conn, issuer="hdfc", last4="6527") is not None
+    assert db.find_card(conn, issuer="icici", last4="0001") is None
+    rows = conn.execute(
+        "SELECT card_id FROM statements WHERE source_ref = ?", ("msg-swiggy",)
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["card_id"] == swiggy.id
+
+
+def test_hdfc_swiggy_prefers_card_no_over_alternate_account():
+    from carddues.text import find_card_last4
+
+    raw = fixtures.HDFC_SWIGGY_ALTERNATE
+    assert find_card_last4(raw) == "6527"
+    result = parse(raw, issuer_hint="hdfc")
+    assert result is not None
+    assert result.last4 == "6527"
+    assert result.total_due == pytest.approx(4551.0)

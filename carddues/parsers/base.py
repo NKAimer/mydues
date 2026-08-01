@@ -45,7 +45,7 @@ DEFAULT_LABELS: dict[str, tuple[str, ...]] = {
         "Total Dues",
         "Total Due",
         "New Balance",
-        "Closing Balance",
+        # Closing Balance is a savings-account field; never treat it as card dues.
         "Net Outstanding",
         "Total Outstanding",
     ),

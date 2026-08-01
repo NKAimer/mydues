@@ -20,9 +20,15 @@ AMOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# HSBC prints posting dates as 25JUN / 02JUL with no separator or year.
+_MONTH_ABBR = (
+    r"Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|"
+    r"JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC"
+)
 _DATE_PATTERNS = [
     r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}",
     r"\d{1,2}[\s\-][A-Za-z]{3,9}[\s,\-]*\d{2,4}",
+    rf"\d{{1,2}}(?:{_MONTH_ABBR})(?:\s*\d{{2,4}})?",
     r"[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}",
     r"\d{4}-\d{2}-\d{2}",
 ]
