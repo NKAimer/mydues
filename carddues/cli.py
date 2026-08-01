@@ -576,6 +576,39 @@ def cmd_serve(args) -> int:
     return 0
 
 
+def cmd_categories_export(args) -> int:
+    """Write live phrase + merchant rules to the committed seed JSON."""
+    conn = db.connect()
+    db.init(conn)
+    path = Path(args.path).expanduser() if args.path else None
+    target = db.write_categories_seed(conn, path)
+    payload = db.categories_seed_payload(conn)
+    console.print(
+        f"Wrote [bold]{len(payload['phrases'])}[/bold] phrases and "
+        f"[bold]{len(payload['merchants'])}[/bold] merchants to [bold]{target}[/bold]"
+    )
+    console.print("Commit that file to share category rules (not the full database).")
+    return 0
+
+
+def cmd_categories_import(args) -> int:
+    """Merge the seed JSON into the local DB (local rows win on conflicts)."""
+    conn = db.connect()
+    db.init(conn)
+    path = Path(args.path).expanduser() if args.path else config.categories_seed_path()
+    if not path.is_file():
+        console.print(f"[red]No seed file at {path}[/red]")
+        return 1
+    phrases, merchants = db.merge_categories_seed(conn, path)
+    conn.commit()
+    console.print(
+        f"Merged from [bold]{path}[/bold]: "
+        f"[green]{phrases}[/green] new phrase(s), "
+        f"[green]{merchants}[/green] new merchant(s)"
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="carddues", description="Track Indian credit card dues")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -694,6 +727,32 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--debug", action="store_true")
     serve.set_defaults(func=cmd_serve)
+
+    categories = sub.add_parser(
+        "categories", help="export/import phrase and merchant category rules"
+    ).add_subparsers(dest="categories_command", required=True)
+
+    cat_export = categories.add_parser(
+        "export",
+        help="write live rules to data/categories.json for git",
+    )
+    cat_export.add_argument(
+        "--path",
+        default=None,
+        help="seed file path (default: data/categories.json in the repo)",
+    )
+    cat_export.set_defaults(func=cmd_categories_export)
+
+    cat_import = categories.add_parser(
+        "import",
+        help="merge seed file into the local DB (local wins on conflicts)",
+    )
+    cat_import.add_argument(
+        "--path",
+        default=None,
+        help="seed file path (default: data/categories.json in the repo)",
+    )
+    cat_import.set_defaults(func=cmd_categories_import)
 
     return parser
 

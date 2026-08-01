@@ -8,5 +8,6 @@ __pycache__/
 credentials.json
 token.json
 *.pdf
-data/
+data/*
+!data/categories.json
 .env

@@ -1,0 +1,658 @@
+{
+  "phrases": [
+    {
+      "phrase": "1mg",
+      "category": "Health"
+    },
+    {
+      "phrase": "@ibl",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "@okaxis",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "@oksbi",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "@paytm",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "@ybl",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "air india",
+      "category": "Travel"
+    },
+    {
+      "phrase": "airbnb",
+      "category": "Travel"
+    },
+    {
+      "phrase": "airlines",
+      "category": "Travel"
+    },
+    {
+      "phrase": "airport",
+      "category": "Travel"
+    },
+    {
+      "phrase": "airtel",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "ajio",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "akasa",
+      "category": "Travel"
+    },
+    {
+      "phrase": "amazon",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "annual fee",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "apollo",
+      "category": "Health"
+    },
+    {
+      "phrase": "apple.com/bill",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "atm",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "auto debit received",
+      "category": "Payment received"
+    },
+    {
+      "phrase": "bakery",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "barbeque",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "bescom",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "bharat petroleum",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "bigbasket",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "bill payment",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "billdesk",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "biryani",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "blinkit",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "bookmyshow",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "bpcl",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "broadband",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "bsnl",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "burger",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "cafe",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "cash advance",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "cash withdrawal",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "cgst",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "cleartrip",
+      "category": "Travel"
+    },
+    {
+      "phrase": "clinic",
+      "category": "Health"
+    },
+    {
+      "phrase": "coffee",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "country delight",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "croma",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "cult.fit",
+      "category": "Health"
+    },
+    {
+      "phrase": "d-mart",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "decathlon",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "diagnostic",
+      "category": "Health"
+    },
+    {
+      "phrase": "dmart",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "domino",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "eatclub",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "eatfit",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "electricity",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "fibernet",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "finance charge",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "flipkart",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "fuel",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "gas bill",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "goibibo",
+      "category": "Travel"
+    },
+    {
+      "phrase": "google play",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "grocer",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "gst",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "hospital",
+      "category": "Health"
+    },
+    {
+      "phrase": "hotel",
+      "category": "Travel"
+    },
+    {
+      "phrase": "hotstar",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "hp pay",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "hpcl",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "igst",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "ikea",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "imps",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "indian oil",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "indigo",
+      "category": "Travel"
+    },
+    {
+      "phrase": "inox",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "instamart",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "insurance",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "interest",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "iocl",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "irctc",
+      "category": "Travel"
+    },
+    {
+      "phrase": "ixigo",
+      "category": "Travel"
+    },
+    {
+      "phrase": "jio",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "jio-bp",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "jiocinema",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "joining fee",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "kfc",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "kirana",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "late payment",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "licious",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "lifestyle",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "makemytrip",
+      "category": "Travel"
+    },
+    {
+      "phrase": "markup",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "mcdonald",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "meesho",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "membership fee",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "metro",
+      "category": "Travel"
+    },
+    {
+      "phrase": "myntra",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "nayara",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "neft",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "neft cr",
+      "category": "Payment received"
+    },
+    {
+      "phrase": "netflix",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "netmeds",
+      "category": "Health"
+    },
+    {
+      "phrase": "nykaa",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "ola",
+      "category": "Travel"
+    },
+    {
+      "phrase": "olacabs",
+      "category": "Travel"
+    },
+    {
+      "phrase": "oyo",
+      "category": "Travel"
+    },
+    {
+      "phrase": "pantaloons",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "payment - thank",
+      "category": "Payment received"
+    },
+    {
+      "phrase": "payment credit",
+      "category": "Payment received"
+    },
+    {
+      "phrase": "payment received",
+      "category": "Payment received"
+    },
+    {
+      "phrase": "penalty",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "petrol",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "pharmacy",
+      "category": "Health"
+    },
+    {
+      "phrase": "pharmeasy",
+      "category": "Health"
+    },
+    {
+      "phrase": "pizza",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "playstation",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "policybazaar",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "practo",
+      "category": "Health"
+    },
+    {
+      "phrase": "premium",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "prime video",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "pvr",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "railway",
+      "category": "Travel"
+    },
+    {
+      "phrase": "rapido",
+      "category": "Travel"
+    },
+    {
+      "phrase": "recharge",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "redbus",
+      "category": "Travel"
+    },
+    {
+      "phrase": "reliance digital",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "reliance fresh",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "resort",
+      "category": "Travel"
+    },
+    {
+      "phrase": "restaurant",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "rtgs",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "shell",
+      "category": "Fuel"
+    },
+    {
+      "phrase": "shoppers stop",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "sonyliv",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "spicejet",
+      "category": "Travel"
+    },
+    {
+      "phrase": "spotify",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "starbucks",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "steam",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "supermarket",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "surcharge",
+      "category": "Fees & interest"
+    },
+    {
+      "phrase": "swiggy",
+      "category": "Food & dining"
+    },
+    {
+      "phrase": "tata cliq",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "tata power",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "tatacliq",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "thank you",
+      "category": "Payment received"
+    },
+    {
+      "phrase": "travel",
+      "category": "Travel"
+    },
+    {
+      "phrase": "uber",
+      "category": "Travel"
+    },
+    {
+      "phrase": "uniqlo",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "upi/",
+      "category": "Cash & transfers"
+    },
+    {
+      "phrase": "vistara",
+      "category": "Travel"
+    },
+    {
+      "phrase": "vodafone",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "water bill",
+      "category": "Bills & utilities"
+    },
+    {
+      "phrase": "westside",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "yatra",
+      "category": "Travel"
+    },
+    {
+      "phrase": "youtube",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "zara",
+      "category": "Shopping"
+    },
+    {
+      "phrase": "zee5",
+      "category": "Entertainment"
+    },
+    {
+      "phrase": "zepto",
+      "category": "Groceries"
+    },
+    {
+      "phrase": "zomato",
+      "category": "Food & dining"
+    }
+  ],
+  "merchants": [
+    {
+      "merchant_key": "15 34 upi smart kids c",
+      "category": "Shopping"
+    },
+    {
+      "merchant_key": "19 30 tata unistore limite 13 c",
+      "category": "Shopping"
+    },
+    {
+      "merchant_key": "apollo pharmacy",
+      "category": "Health"
+    },
+    {
+      "merchant_key": "bharatconnectutiliti",
+      "category": "Bills & utilities"
+    },
+    {
+      "merchant_key": "cas swiggy",
+      "category": "Food & dining"
+    },
+    {
+      "merchant_key": "icicilombard",
+      "category": "Bills & utilities"
+    },
+    {
+      "merchant_key": "jio mart",
+      "category": "Groceries"
+    },
+    {
+      "merchant_key": "reliance retail",
+      "category": "Groceries"
+    },
+    {
+      "merchant_key": "tata unistore",
+      "category": "Shopping"
+    }
+  ]
+}

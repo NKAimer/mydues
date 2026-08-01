@@ -30,6 +30,19 @@ def attachments_dir() -> Path:
     return home() / "attachments"
 
 
+def categories_seed_path() -> Path:
+    """Committed category phrases + merchant overrides (not the full DB).
+
+    Override with CARDDUES_CATEGORIES_SEED. Default is ``data/categories.json``
+    next to the repo root when developing from a clone.
+    """
+    override = os.environ.get("CARDDUES_CATEGORIES_SEED")
+    if override:
+        return Path(override).expanduser()
+    # carddues/config.py → repo root / data/categories.json
+    return Path(__file__).resolve().parent.parent / "data" / "categories.json"
+
+
 def session_secret() -> str:
     """Key for signing the dashboard's session cookie.
 

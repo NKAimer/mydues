@@ -1,6 +1,7 @@
 """Shared spend categorisation: keywords, merchant memory, expense alerts."""
 
 from datetime import date, datetime
+import json
 
 import pytest
 
@@ -801,3 +802,56 @@ def test_parse_alert_sets_category_source():
     assert expense is not None
     assert expense.category == "Food & dining"
     assert expense.category_source == CATEGORY_GUESS
+
+
+def test_categories_seed_export_and_merge_local_wins(conn, tmp_path):
+    seed = tmp_path / "categories.json"
+    db.upsert_category_phrase(conn, "custom cafe", "Food & dining")
+    db.upsert_merchant_category_key(conn, "customcafe", "Food & dining")
+
+    written = db.write_categories_seed(conn, seed)
+    assert written == seed
+    payload = json.loads(seed.read_text(encoding="utf-8"))
+    assert any(p["phrase"] == "custom cafe" for p in payload["phrases"])
+    assert any(m["merchant_key"] == "customcafe" for m in payload["merchants"])
+
+    # Fresh DB: seed merges after builtins.
+    conn2 = db.connect(tmp_path / "other.db")
+    db.init(conn2)
+    # Clear and re-merge from our seed only (init may have used repo seed).
+    conn2.execute("DELETE FROM category_phrases")
+    conn2.execute("DELETE FROM merchant_categories")
+    conn2.commit()
+    phrases, merchants = db.merge_categories_seed(conn2, seed)
+    conn2.commit()
+    assert phrases >= 1
+    assert merchants >= 1
+    assert any(
+        r["phrase"] == "custom cafe" and r["category"] == "Food & dining"
+        for r in db.list_category_phrases(conn2)
+    )
+
+    # Local wins: existing phrase category is not overwritten by seed.
+    db.upsert_category_phrase(conn2, "custom cafe", "Shopping")
+    seed.write_text(
+        json.dumps(
+            {
+                "phrases": [{"phrase": "custom cafe", "category": "Food & dining"}],
+                "merchants": [{"merchant_key": "customcafe", "category": "Travel"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    again_p, again_m = db.merge_categories_seed(conn2, seed)
+    conn2.commit()
+    assert again_p == 0
+    assert again_m == 0
+    row = conn2.execute(
+        "SELECT category FROM category_phrases WHERE phrase = ?", ("custom cafe",)
+    ).fetchone()
+    assert row["category"] == "Shopping"
+    merchant = conn2.execute(
+        "SELECT category FROM merchant_categories WHERE merchant_key = ?",
+        ("customcafe",),
+    ).fetchone()
+    assert merchant["category"] == "Food & dining"

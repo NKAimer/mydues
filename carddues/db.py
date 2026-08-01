@@ -193,6 +193,7 @@ def init(conn: sqlite3.Connection) -> None:
             """
         )
     seed_category_phrases_from_builtins(conn)
+    merge_categories_seed(conn)
     conn.commit()
 
 
@@ -223,6 +224,92 @@ def seed_category_phrases_from_builtins(conn: sqlite3.Connection) -> int:
             )
             inserted += cursor.rowcount or 0
     return inserted
+
+
+def categories_seed_payload(conn: sqlite3.Connection) -> dict:
+    """Snapshot phrase rules and merchant overrides for the committed seed file."""
+    phrases = [
+        {"phrase": row["phrase"], "category": row["category"]}
+        for row in conn.execute(
+            "SELECT phrase, category FROM category_phrases "
+            "ORDER BY phrase COLLATE NOCASE"
+        )
+    ]
+    merchants = [
+        {"merchant_key": row["merchant_key"], "category": row["category"]}
+        for row in conn.execute(
+            "SELECT merchant_key, category FROM merchant_categories "
+            "ORDER BY merchant_key COLLATE NOCASE"
+        )
+    ]
+    return {"phrases": phrases, "merchants": merchants}
+
+
+def write_categories_seed(
+    conn: sqlite3.Connection, path: Path | None = None
+) -> Path:
+    """Write the live category tables to the seed JSON. Returns the path used."""
+    target = path or config.categories_seed_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    payload = categories_seed_payload(conn)
+    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    return target
+
+
+def merge_categories_seed(
+    conn: sqlite3.Connection, path: Path | None = None
+) -> tuple[int, int]:
+    """Add missing seed phrases/merchants. Local rows win on key conflicts.
+
+    Returns ``(phrases_inserted, merchants_inserted)``. Missing file → (0, 0).
+    """
+    target = path or config.categories_seed_path()
+    if not target.is_file():
+        return 0, 0
+    try:
+        payload = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0, 0
+    if not isinstance(payload, dict):
+        return 0, 0
+
+    now = datetime.now().isoformat(timespec="seconds")
+    phrases_inserted = 0
+    for item in payload.get("phrases") or []:
+        if not isinstance(item, dict):
+            continue
+        phrase = (item.get("phrase") or "").strip().lower()
+        category = (item.get("category") or "").strip()
+        if not phrase or not category:
+            continue
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO category_phrases (phrase, category, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (phrase, category, now),
+        )
+        phrases_inserted += cursor.rowcount or 0
+
+    merchants_inserted = 0
+    for item in payload.get("merchants") or []:
+        if not isinstance(item, dict):
+            continue
+        key = (item.get("merchant_key") or "").strip()
+        category = (item.get("category") or "").strip()
+        if not key or not category:
+            continue
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO merchant_categories
+                (merchant_key, category, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (key, category, now),
+        )
+        merchants_inserted += cursor.rowcount or 0
+
+    return phrases_inserted, merchants_inserted
 
 
 def _iso(value: date | datetime | None) -> str | None:

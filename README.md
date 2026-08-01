@@ -125,6 +125,7 @@ in [RESTART.md](RESTART.md).
 |-----------------|--------|
 | `CARDDUES_HOME` | Data directory (default `~/.carddues`) |
 | `CARDDUES_CREDENTIALS` | Path to Google OAuth client JSON (default `$CARDDUES_HOME/credentials.json`) |
+| `CARDDUES_CATEGORIES_SEED` | Phrase/merchant seed JSON (default `data/categories.json` in the repo) |
 | `$CARDDUES_HOME/carddues.db` | SQLite database (cards, statements, transactions, expenses, categories) |
 | `$CARDDUES_HOME/credentials.json` | OAuth client downloaded from Google Cloud |
 | `$CARDDUES_HOME/token.json` | Access + refresh tokens after Connect Gmail |
@@ -192,6 +193,17 @@ Shared rules for statement line items and the expenses ledger.
 - Edit phrase rules and merchant memory; **Re-apply category rules** updates
   blank and auto-categorised rows (manual edits stay put; issuer labels only
   change when a learned merchant matches)
+- To version category rules in git (not the full DB), export then commit:
+
+```bash
+carddues categories export          # writes data/categories.json
+git add data/categories.json && git commit
+```
+
+On another machine (or after `git pull`), `carddues init` / starting the dashboard
+merges that file into the local DB (`INSERT OR IGNORE` — existing local rows win).
+Or run `carddues categories import` explicitly. Override the path with
+`CARDDUES_CATEGORIES_SEED` if needed.
 
 ## CLI workflows
 
@@ -232,6 +244,9 @@ carddues show          # table in the terminal
 carddues show --json   # machine readable
 carddues log           # what the last ingest did with each attachment
 carddues audit         # weak / incomplete parses across cards
+
+carddues categories export   # data/categories.json for git
+carddues categories import   # merge seed into local DB
 
 carddues serve         # dashboard on http://127.0.0.1:8765
 ```
