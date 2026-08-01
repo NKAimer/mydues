@@ -230,9 +230,23 @@ def _merchant_key_matches(stored: str, description_key: str) -> bool:
     if stored in description_key or description_key in stored:
         return True
     stored_tokens = _stemmed_tokens(stored)
-    if not stored_tokens:
-        return False
-    return stored_tokens <= _stemmed_tokens(description_key)
+    if stored_tokens and stored_tokens <= _stemmed_tokens(description_key):
+        return True
+    # Compact form: "bharatconnectutiliti" ↔ "upi bharat connect uties"
+    skip = {"upi", "www", "http", "https", "com"}
+    compact_stored = "".join(p for p in stored.split() if p not in skip)
+    compact_desc = "".join(p for p in description_key.split() if p not in skip)
+    if len(compact_stored) >= 8 and len(compact_desc) >= 8:
+        if compact_stored in compact_desc or compact_desc in compact_stored:
+            return True
+        shared = 0
+        for left, right in zip(compact_stored, compact_desc):
+            if left != right:
+                break
+            shared += 1
+        if shared >= 12:
+            return True
+    return False
 
 
 def categorise(

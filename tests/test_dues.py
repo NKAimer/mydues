@@ -168,3 +168,14 @@ def test_credit_balance_is_not_treated_as_owed(conn):
 )
 def test_indian_number_formatting(amount, expected):
     assert dues.format_inr(amount) == expected
+
+
+def test_portfolio_orders_cards_by_statement_date_newest_first(conn):
+    older = make_card(conn, label="Older Card", last4="1111")
+    newer = make_card(conn, label="Newer Card", last4="2222")
+    undated = make_card(conn, label="No Statement", last4="3333")
+    add_record(conn, older, statement_date=date(2026, 7, 5))
+    add_record(conn, newer, statement_date=date(2026, 7, 20))
+
+    book = dues.portfolio(conn, today=TODAY)
+    assert [v.card.last4 for v in book.views] == ["2222", "1111", "3333"]

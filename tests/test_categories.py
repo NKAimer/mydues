@@ -78,6 +78,14 @@ def test_memory_fuzzy_match_pharmacies_to_pharmacy(conn):
     assert source == CATEGORY_MEMORY
 
 
+def test_memory_fuzzy_match_compact_bharat_connect(conn):
+    remember_merchant_category(conn, "BharatConnectUtiliti", "Bills & utilities")
+    assert lookup_merchant_category(conn, "UPI-Bharat Connect Uties") == "Bills & utilities"
+    category, source = resolve_category("BharatConnectUtiliti", conn=conn)
+    assert category == "Bills & utilities"
+    assert source == CATEGORY_MEMORY
+
+
 def test_memory_fuzzy_match_exact_still_works(conn):
     remember_merchant_category(conn, "SWIGGY BANGALORE", "Travel")
     assert lookup_merchant_category(conn, "SWIGGY BANGALORE") == "Travel"

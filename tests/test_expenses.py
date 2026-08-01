@@ -160,6 +160,39 @@ def test_parse_hdfc_upi_prefers_body_merchant_over_vpa_subject():
     assert "confirm that" not in expense.description.lower()
 
 
+def test_parse_hdfc_payment_was_made_alert():
+    expense = expense_ingest.parse_alert_email(
+        subject="A payment was made using your Credit Card",
+        body=(
+            "HDFC BANK --> Dear Customer, Greetings from HDFC Bank. We would like "
+            "to inform you that Rs. 335.00 has been debited from your HDFC Bank "
+            "Credit Card ending 6527 towards SWIGGY PVT LTD FOOD2 on 01 Aug, 2026 "
+            "at 20:36:36."
+        ),
+        received_at=datetime(2026, 8, 1, 20, 36),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(335.0)
+    assert expense.spent_on == date(2026, 8, 1)
+    assert "SWIGGY" in expense.description.upper()
+
+
+def test_parse_sbi_phonepe_spent_at_merchant():
+    expense = expense_ingest.parse_alert_email(
+        subject="Transaction Alert from PhonePe SBI card SELECT BLACK",
+        body=(
+            "SBI Having trouble viewing this e-mail? Dear Cardholder, This is to "
+            "inform you that, Rs.938.70 spent on your SBI Credit Card ending with "
+            "3418 at BharatConnectUtiliti on 01-08-26 via UPI (Ref No. 476684159067)."
+        ),
+        received_at=datetime(2026, 8, 1, 12, 0),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(938.7)
+    assert "BHARATCONNECTUTILITI" in expense.description.upper()
+    assert "inform you that" not in expense.description.lower()
+
+
 def test_parse_upi_payment_alert():
     expense = expense_ingest.parse_alert_email(
         subject="UPI payment of Rs.2550.00",
@@ -206,6 +239,7 @@ def test_alert_query_requires_transaction_subjects_and_skips_loans():
     assert 'subject:"upi"' in query
     assert 'subject:"upi payment"' in query
     assert 'subject:"upi alert"' in query
+    assert 'subject:"payment was made using your credit card"' in query
     assert '-subject:"loan"' in query
     assert '-subject:"pre-approved"' in query
     assert "from:" not in query

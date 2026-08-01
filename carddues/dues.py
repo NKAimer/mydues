@@ -252,17 +252,9 @@ def all_views(
 
 
 def _sort_key(view: DueView) -> tuple:
-    order = {
-        STATUS_OVERDUE: 0,
-        STATUS_DUE_TODAY: 1,
-        STATUS_DUE_SOON: 2,
-        STATUS_UPCOMING: 3,
-        STATUS_UNKNOWN_DUE_DATE: 4,
-        STATUS_SETTLED: 5,
-        STATUS_NO_DATA: 6,
-    }
-    days = view.days_to_due
-    return (order.get(view.status, 9), days if days is not None else 9999, view.card.label)
+    """Newest statement date first; undated cards last; label as tie-breaker."""
+    statement_date = view.statement_date or date.min
+    return (-statement_date.toordinal(), view.card.label.lower())
 
 
 @dataclass

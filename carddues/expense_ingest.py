@@ -40,6 +40,8 @@ ALERT_SUBJECT_HINTS = (
     "transaction of rs",
     "transaction of inr",
     "purchase",
+    # HDFC InstaAlerts (no "transaction alert" / "debited" in the subject).
+    "payment was made using your credit card",
     # UPI spend alerts (PhonePe / GPay / bank UPI notifications).
     "upi",
     "upi alert",
@@ -93,6 +95,12 @@ _INR = re.compile(
 )
 # Capture merchant after common alert lead-ins; stop before dates / card boilerplate.
 _MERCHANT_PATTERNS = (
+    # SBI / PhonePe: "Rs.X spent on your SBI Credit Card ending with 3418 at MERCHANT on DATE"
+    re.compile(
+        r"(?i)spent\s+on\s+your\s+.+?\s+at\s+"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80}?)"
+        r"(?=\s+on\s+\d|\s+via\s+|\s+using\s+|\s+ref(?:erence)?\b|[.,]|$)"
+    ),
     re.compile(
         r"(?i)(?:purchase\s+transaction(?:\s+of\s+(?:rs\.?|inr|₹)\s*[0-9,]+\.?\d*)?)"
         r"\s+(?:at|with|towards|to)\s+"
@@ -110,8 +118,10 @@ _MERCHANT_PATTERNS = (
     re.compile(
         r"(?i)\bUPI[_/]+([A-Za-z][A-Za-z0-9 &.'@/_-]{1,60})"
     ),
+    # Avoid "to inform you that…" from SBI boilerplate.
     re.compile(
-        r"(?i)(?<![A-Za-z])(?:at|to)\s+([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
+        r"(?i)(?<![A-Za-z])(?:at|to(?!\s+inform))\s+"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
     ),
 )
 _VPA_RE = re.compile(
@@ -137,6 +147,7 @@ _DATE_INLINE = re.compile(
 _BAD_MERCHANT = re.compile(
     r"(?i)\b(?:"
     r"confirm\s+that\s+your"
+    r"|inform\s+you\s+that"
     r"|credit\s+card\s+no\s+ending"
     r"|card\s+no\s+ending\s+with"
     r"|primary\s+card\s+holder"
