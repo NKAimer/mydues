@@ -16,7 +16,7 @@ from ..categories import (
     remember_merchant_category,
 )
 from ..dues import format_inr
-from ..models import SOURCE_MANUAL, Card, Expense, StatementRecord
+from ..models import SOURCE_GMAIL, SOURCE_MANUAL, Card, Expense, StatementRecord
 
 logger = logging.getLogger(__name__)
 
@@ -809,6 +809,50 @@ def create_app() -> Flask:
         else:
             flash(f"Removed {existing.description}.", "success")
         return redirect(url_for("index", tab="expenses", month=month_key))
+
+    @app.get("/expenses/<int:expense_id>/email")
+    def expense_email(expense_id: int):
+        """Show the Gmail alert behind a gmail-sourced expense."""
+        conn = db.connect()
+        db.init(conn)
+        expense = db.get_expense(conn, expense_id)
+        month_key = (
+            expense.spent_on.strftime("%Y-%m") if expense else date.today().strftime("%Y-%m")
+        )
+        back = url_for("index", tab="expenses", month=month_key)
+
+        if expense is None:
+            flash("That expense is gone.", "error")
+            return redirect(back)
+        if expense.source != SOURCE_GMAIL or not expense.source_ref:
+            flash("This expense was not imported from Gmail.", "error")
+            return redirect(back)
+        if not gmail.is_connected():
+            flash("Connect Gmail to view the original email.", "error")
+            return redirect(back)
+
+        try:
+            service = gmail.service(interactive=False)
+            message = gmail.get_message(service, expense.source_ref)
+        except gmail.GmailNotConfigured as exc:
+            flash(str(exc), "error")
+            return redirect(back)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Could not load expense email %s", expense.source_ref)
+            flash(f"Could not load that email: {exc}", "error")
+            return redirect(back)
+
+        body = expense_ingest._strip_html(message.body or "")
+        return render_template(
+            "expense_email.html",
+            expense=expense,
+            subject=message.subject or "(no subject)",
+            sender=message.sender or "",
+            received=message.received_at,
+            body=body,
+            back_url=back,
+            today=date.today(),
+        )
 
     @app.post("/expenses/fetch")
     def fetch_expenses():

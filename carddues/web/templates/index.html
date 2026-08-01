@@ -144,6 +144,9 @@
                     <button class="btn primary" type="submit">Save</button>
                   </form>
                 </details>
+                {% if expense.source == 'gmail' and expense.source_ref %}
+                  <a class="btn subtle" href="{{ url_for('expense_email', expense_id=expense.id) }}">Show email</a>
+                {% endif %}
                 <form method="post" action="{{ url_for('delete_expense', expense_id=expense.id) }}"
                       onsubmit="return confirm('Delete this expense?')">
                   <button class="btn danger" type="submit">Delete</button>
@@ -186,7 +189,7 @@
 
   <section class="panel">
     <h2>Phrase rules</h2>
-    <p class="sub">Substring matches applied after learned merchants and before built-in keywords.</p>
+    <p class="sub">Substring matches applied after learned merchants. Edit or delete any rule to change how merchants are categorised.</p>
     {% if category_phrases %}
       <table class="expense-table">
         <thead>
@@ -225,7 +228,7 @@
         </tbody>
       </table>
     {% else %}
-      <p class="empty">No custom phrase rules yet.</p>
+      <p class="empty">No phrase rules.</p>
     {% endif %}
 
     <h3 class="section-subhead">Add phrase</h3>

@@ -248,29 +248,54 @@ def test_edit_transaction_category_preserves_statement_query(client, conn):
 
 
 def test_upsert_and_delete_category_phrase(conn):
+    before = len(db.list_category_phrases(conn))
+    assert before > 0  # seeded from builtins on init
+
     phrase_id = db.upsert_category_phrase(conn, "sunrise traders", "Shopping")
     assert phrase_id is not None
     rows = db.list_category_phrases(conn)
-    assert len(rows) == 1
-    assert rows[0]["phrase"] == "sunrise traders"
-    assert rows[0]["category"] == "Shopping"
+    assert len(rows) == before + 1
+    custom = next(row for row in rows if row["id"] == phrase_id)
+    assert custom["phrase"] == "sunrise traders"
+    assert custom["category"] == "Shopping"
 
     same_id = db.upsert_category_phrase(conn, "SUNRISE TRADERS", "Travel")
     assert same_id == phrase_id
     rows = db.list_category_phrases(conn)
-    assert len(rows) == 1
-    assert rows[0]["category"] == "Travel"
+    assert len(rows) == before + 1
+    custom = next(row for row in rows if row["id"] == phrase_id)
+    assert custom["category"] == "Travel"
 
     assert db.delete_category_phrase(conn, phrase_id)
-    assert db.list_category_phrases(conn) == []
+    assert len(db.list_category_phrases(conn)) == before
+    assert all(row["id"] != phrase_id for row in db.list_category_phrases(conn))
+
+
+def test_init_seeds_category_phrases(conn):
+    rows = db.list_category_phrases(conn)
+    phrases = {row["phrase"] for row in rows}
+    assert "swiggy" in phrases
+    assert "zomato" in phrases
+    food = next(row for row in rows if row["phrase"] == "swiggy")
+    assert food["category"] == "Food & dining"
+    # Re-init must not duplicate when the table already has rows.
+    again = db.seed_category_phrases_from_builtins(conn)
+    assert again == 0
+    assert len(db.list_category_phrases(conn)) == len(rows)
 
 
 def test_categorise_prefers_user_phrase_over_builtin():
-    # Builtin would map "cafe" → Food & dining; user rule wins.
+    # Builtin would map "cafe" → Food & dining; provided phrases win alone.
     assert categorise("LOCAL CAFE ORDER") == "Food & dining"
     assert (
         categorise("LOCAL CAFE ORDER", phrases=[("cafe", "Shopping")]) == "Shopping"
     )
+
+
+def test_categorise_phrases_only_when_provided():
+    # Empty list means no match — do not fall back to builtins.
+    assert categorise("SWIGGY BANGALORE", phrases=[]) is None
+    assert categorise("SWIGGY BANGALORE", phrases=[("zomato", "Food & dining")]) is None
 
 
 def test_categorise_longest_phrase_wins():
@@ -288,6 +313,23 @@ def test_resolve_prefers_user_phrase_over_builtin(conn):
     category, source = resolve_category("SWIGGY BANGALORE", conn=conn)
     assert category == "Travel"
     assert source == CATEGORY_GUESS
+
+
+def test_resolve_uses_seeded_phrase(conn):
+    category, source = resolve_category("SWIGGY BANGALORE", conn=conn)
+    assert category == "Food & dining"
+    assert source == CATEGORY_GUESS
+
+
+def test_deleting_seeded_phrase_stops_matching(conn):
+    rows = db.list_category_phrases(conn)
+    swiggy = next(row for row in rows if row["phrase"] == "swiggy")
+    assert db.delete_category_phrase(conn, swiggy["id"])
+    category, source = resolve_category("SWIGGY BANGALORE", conn=conn)
+    assert category is None
+    assert source is None
+    # Builtins still work when no phrases list is supplied.
+    assert categorise("SWIGGY BANGALORE") == "Food & dining"
 
 
 def test_memory_beats_user_phrase(conn):
@@ -356,6 +398,10 @@ def test_categories_tab_phrase_crud(client, conn):
     assert response.status_code == 200
     assert b"Phrase rules" in response.data
     assert b"Learned merchants" in response.data
+    assert b"swiggy" in response.data
+    assert b"No custom phrase rules yet." not in response.data
+    assert b"before built-in keywords" not in response.data
+    before = len(db.list_category_phrases(conn))
 
     response = client.post(
         "/category-phrases",
@@ -365,8 +411,10 @@ def test_categories_tab_phrase_crud(client, conn):
     assert response.status_code == 302
     assert "tab=categories" in response.headers["Location"]
     rows = db.list_category_phrases(conn)
-    assert len(rows) == 1
-    phrase_id = rows[0]["id"]
+    assert len(rows) == before + 1
+    custom = next(row for row in rows if row["phrase"] == "sunrise")
+    phrase_id = custom["id"]
+    assert custom["category"] == "Shopping"
 
     response = client.post(
         f"/category-phrases/{phrase_id}/edit",
@@ -375,15 +423,19 @@ def test_categories_tab_phrase_crud(client, conn):
     )
     assert response.status_code == 302
     rows = db.list_category_phrases(conn)
-    assert rows[0]["phrase"] == "sunrise traders"
-    assert rows[0]["category"] == "Travel"
+    custom = next(row for row in rows if row["id"] == phrase_id)
+    assert custom["phrase"] == "sunrise traders"
+    assert custom["category"] == "Travel"
 
     response = client.post(
         f"/category-phrases/{phrase_id}/delete",
         follow_redirects=False,
     )
     assert response.status_code == 302
-    assert db.list_category_phrases(conn) == []
+    assert len(db.list_category_phrases(conn)) == before
+    assert all(row["phrase"] != "sunrise traders" for row in db.list_category_phrases(conn))
+    # Seeded builtins remain visible after deleting a custom rule.
+    assert any(row["phrase"] == "swiggy" for row in db.list_category_phrases(conn))
 
 
 def test_categories_tab_merchant_crud(client, conn):

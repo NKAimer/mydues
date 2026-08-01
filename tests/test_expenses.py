@@ -145,12 +145,26 @@ def test_alert_query_requires_transaction_subjects_and_skips_loans():
     query = expense_ingest.build_alert_query(90)
     assert 'subject:"transaction alert"' in query
     assert 'subject:"debited"' in query
+    assert 'subject:"upi"' in query
+    assert 'subject:"upi payment"' in query
+    assert 'subject:"upi alert"' in query
     assert '-subject:"loan"' in query
     assert '-subject:"pre-approved"' in query
     assert "from:" not in query
     assert " OR subject:" in query or 'subject:"' in query
     # Must not fall back to matching any mail from bank domains alone.
     assert "from:hdfcbank" not in query
+
+
+def test_parse_upi_payment_alert():
+    expense = expense_ingest.parse_alert_email(
+        subject="UPI payment of Rs.2550.00",
+        body="You paid Rs.2550.00 to MERCHANT STORE via UPI on 25-07-2026.",
+        received_at=datetime(2026, 7, 25, 14, 0),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(2550.0)
+    assert expense.spent_on == date(2026, 7, 25)
 
 
 def test_expenses_tab_and_manual_add(client, conn):
@@ -215,3 +229,47 @@ def test_edit_and_delete_expense(client, conn):
 
     client.post(f"/expenses/{expense_id}/delete", follow_redirects=True)
     assert db.get_expense(conn, expense_id) is None
+
+
+def test_show_email_loads_gmail_message(client, conn, monkeypatch):
+    from carddues import gmail
+
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 7, 28),
+            amount=433.0,
+            description="SWIGGY",
+            source=SOURCE_GMAIL,
+            source_ref="msg-show-1",
+        ),
+    )
+    message = gmail.Message(
+        id="msg-show-1",
+        sender="alerts@hdfcbank.net",
+        subject="Transaction Alert: Rs.433 spent",
+        internal_date=int(datetime(2026, 7, 28, 10, 0).timestamp() * 1000),
+        body="Rs. 433.00 spent at SWIGGY BANGALORE using your card.",
+    )
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+    monkeypatch.setattr(gmail, "service", lambda **_: object())
+    monkeypatch.setattr(gmail, "get_message", lambda *_a, **_k: message)
+
+    page = client.get(f"/expenses/{expense_id}/email").get_data(as_text=True)
+    assert "Transaction Alert: Rs.433 spent" in page
+    assert "SWIGGY BANGALORE" in page
+    assert "Back to expenses" in page
+
+
+def test_show_email_requires_gmail_source(client, conn):
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 7, 1),
+            amount=10.0,
+            description="Manual",
+            source=SOURCE_MANUAL,
+        ),
+    )
+    response = client.get(f"/expenses/{expense_id}/email", follow_redirects=True)
+    assert "not imported from Gmail" in response.get_data(as_text=True)

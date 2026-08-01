@@ -213,12 +213,14 @@ def categorise(
 ) -> str | None:
     """A coarse category worked out from the merchant / narration text.
 
-    User phrase rules (longest first) beat the built-in keyword map.
+    When ``phrases`` is provided (including an empty list), only those rules
+    are used — longest first — so deleting a seeded phrase actually stops
+    matching. When ``phrases`` is None, the built-in keyword map is used.
     """
     if not description:
         return None
     lowered = f" {description.lower()} "
-    if phrases:
+    if phrases is not None:
         ordered = sorted(
             ((p.strip(), c) for p, c in phrases if (p or "").strip()),
             key=lambda pair: len(pair[0]),
@@ -227,6 +229,7 @@ def categorise(
         for phrase, category in ordered:
             if phrase.lower() in lowered:
                 return category
+        return None
     for category, keywords in CATEGORY_KEYWORDS.items():
         if any(keyword in lowered for keyword in keywords):
             return category
@@ -289,7 +292,10 @@ def resolve_category(
     note: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> tuple[str | None, str | None]:
-    """Pick a category: issuer print → merchant memory → user phrases → builtins.
+    """Pick a category: issuer print → merchant memory → phrase rules.
+
+    With a connection, phrase rules come from ``category_phrases`` (seeded from
+    builtins on init). Without one, ``categorise`` uses the built-in map.
 
     Returns `(category, source)` where source is statement / memory / guess.
     """

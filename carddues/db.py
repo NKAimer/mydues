@@ -188,7 +188,37 @@ def init(conn: sqlite3.Connection) -> None:
               AND ABS(total_due) <= 500
             """
         )
+    seed_category_phrases_from_builtins(conn)
     conn.commit()
+
+
+def seed_category_phrases_from_builtins(conn: sqlite3.Connection) -> int:
+    """Insert CATEGORY_KEYWORDS into category_phrases when that table is empty.
+
+    One row per keyword string. Returns how many rows were inserted.
+    """
+    row = conn.execute("SELECT COUNT(*) AS n FROM category_phrases").fetchone()
+    if row and int(row["n"]) > 0:
+        return 0
+    # Imported here to avoid a circular import at module load.
+    from .categories import CATEGORY_KEYWORDS
+
+    now = datetime.now().isoformat(timespec="seconds")
+    inserted = 0
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        for keyword in keywords:
+            phrase = (keyword or "").strip().lower()
+            if not phrase:
+                continue
+            cursor = conn.execute(
+                """
+                INSERT OR IGNORE INTO category_phrases (phrase, category, updated_at)
+                VALUES (?, ?, ?)
+                """,
+                (phrase, category, now),
+            )
+            inserted += cursor.rowcount or 0
+    return inserted
 
 
 def _iso(value: date | datetime | None) -> str | None:
@@ -856,7 +886,7 @@ def upsert_category_phrase(
     conn: sqlite3.Connection, phrase: str, category: str
 ) -> int | None:
     """Insert or refresh a phrase→category rule. Returns row id, or None if blank."""
-    phrase = (phrase or "").strip()
+    phrase = (phrase or "").strip().lower()
     category = (category or "").strip()
     if not phrase or not category:
         return None
@@ -886,7 +916,7 @@ def update_category_phrase(
     category: str,
 ) -> bool:
     """Update phrase and category by id. True if a row changed."""
-    phrase = (phrase or "").strip()
+    phrase = (phrase or "").strip().lower()
     category = (category or "").strip()
     if not phrase or not category:
         return False

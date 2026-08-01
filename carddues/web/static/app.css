@@ -179,6 +179,26 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.email-view .email-meta {
+  margin: 0 0 6px;
+}
+.email-view .email-meta.sub {
+  color: var(--muted);
+  font-size: 13px;
+}
+.email-body {
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-height: 70vh;
+  overflow: auto;
+}
+
 h1, h2 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 h1 { font-size: 26px; }
 h2 { font-size: 17px; }
