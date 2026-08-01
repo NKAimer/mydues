@@ -17,7 +17,11 @@
     <div class="masthead-actions">
       {% if tab == 'expenses' %}
         {% if gmail_connected %}
-          <form method="post" action="{{ url_for('fetch_expenses') }}" class="js-progress-form" data-job="expenses" data-title="Fetching expense alerts">
+          <form method="post" action="{{ url_for('fetch_expenses') }}" class="js-progress-form expense-fetch" data-job="expenses" data-title="Fetching expense alerts">
+            <label class="days-field">Last
+              <input type="number" name="days" value="7" min="1" max="400" inputmode="numeric" required>
+              days
+            </label>
             <button class="btn primary" type="submit">Fetch expense alerts</button>
           </form>
           <form method="post" action="{{ url_for('refresh_expenses') }}">

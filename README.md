@@ -135,7 +135,7 @@ Nothing is sent anywhere except Google's OAuth and Gmail APIs for mail you alrea
 own. This project never asks for net banking credentials and does no screen scraping.
 
 Tunables in code (not env vars): statement lookback defaults to **400 days**;
-expense-alert lookback defaults to **90 days**; a statement older than **40 days**
+expense-alert lookback defaults to **7 days** (overridable on Fetch); a statement older than **40 days**
 is treated as stale.
 
 ## Dashboard
@@ -176,8 +176,8 @@ Separate from statement PDFs so dues Fetch never double-counts alert mail.
   `spent`, `UPI`, …). Statement and loan-offer subjects are skipped; parsing
   reads amount, date, and merchant from the body with bank-agnostic patterns
   rather than per-bank subject rules alone
-- **Fetch expense alerts** (default lookback 90 days) and **Refresh descriptions
-  from Gmail**
+- **Fetch expense alerts** (default lookback **7 days**, editable on the button
+  row) and **Refresh descriptions from Gmail**
 - Add / edit / delete expenses by hand; **Show email** for Gmail-sourced rows
 - Totals and category breakdown for the selected calendar month (`spent_on`)
 

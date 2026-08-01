@@ -27,13 +27,20 @@
     }
   }
 
-  function runJob(job, title) {
+  function runJob(job, title, form) {
     openProgress(title);
     document.querySelectorAll(".js-progress-form button").forEach((btn) => {
       btn.disabled = true;
     });
 
-    const source = new EventSource("/ingest/stream?job=" + encodeURIComponent(job));
+    let url = "/ingest/stream?job=" + encodeURIComponent(job);
+    if (job === "expenses" && form) {
+      const daysInput = form.querySelector('input[name="days"]');
+      if (daysInput && daysInput.value) {
+        url += "&days=" + encodeURIComponent(daysInput.value);
+      }
+    }
+    const source = new EventSource(url);
 
     source.onmessage = function (event) {
       let data;
@@ -101,7 +108,7 @@
         form.submit();
         return;
       }
-      runJob(job, title);
+      runJob(job, title, form);
     });
   });
 })();

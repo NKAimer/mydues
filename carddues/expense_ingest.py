@@ -230,7 +230,7 @@ class ExpenseIngestSummary:
     results: list[str] = field(default_factory=list)
 
 
-def build_alert_query(lookback_days: int = 90) -> str:
+def build_alert_query(lookback_days: int = 7) -> str:
     """Gmail search for spend alerts via subject hints or issuer senders + spend cues."""
     subjects = " OR ".join(f'subject:"{hint}"' for hint in ALERT_SUBJECT_HINTS)
     domains = " OR ".join(issuers.all_senders())
@@ -580,7 +580,7 @@ def refresh_gmail_expenses(
 def ingest_expense_alerts(
     conn,
     *,
-    lookback_days: int = 90,
+    lookback_days: int = 7,
     limit: int = 200,
     interactive: bool = False,
     on_progress: ProgressCallback | None = None,

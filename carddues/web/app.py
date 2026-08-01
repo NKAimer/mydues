@@ -149,6 +149,15 @@ def _as_datetime(value: str | None) -> datetime | None:
         return None
 
 
+def _parse_lookback_days(value: str | None, *, default: int = 7) -> int:
+    """Positive day count for Gmail expense search; clamps to 1..400."""
+    try:
+        days = int((value or "").strip())
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(days, 400))
+
+
 def _parse_month(value: str | None) -> date:
     """First day of YYYY-MM, or the current month."""
     today = date.today()
@@ -540,8 +549,12 @@ def create_app() -> Flask:
                             raise gmail.GmailNotConfigured(
                                 "Connect Gmail first so expense alerts can be fetched."
                             )
+                        lookback_days = _parse_lookback_days(request.args.get("days"))
                         summary = expense_ingest.ingest_expense_alerts(
-                            conn, interactive=False, on_progress=on_progress
+                            conn,
+                            interactive=False,
+                            lookback_days=lookback_days,
+                            on_progress=on_progress,
                         )
                         message = (
                             f"Added {summary.added} expense(s) from Gmail"
@@ -946,8 +959,11 @@ def create_app() -> Flask:
         if not gmail.is_connected():
             flash("Connect Gmail first so expense alerts can be fetched.", "error")
             return redirect(url_for("index", tab="expenses"))
+        lookback_days = _parse_lookback_days(request.form.get("days"))
         try:
-            summary = expense_ingest.ingest_expense_alerts(conn, interactive=False)
+            summary = expense_ingest.ingest_expense_alerts(
+                conn, interactive=False, lookback_days=lookback_days
+            )
         except gmail.GmailNotConfigured as exc:
             flash(str(exc), "error")
             return redirect(url_for("index", tab="expenses"))
@@ -958,7 +974,8 @@ def create_app() -> Flask:
 
         flash(
             f"Added {summary.added} expense(s) from Gmail"
-            + (f"; skipped {summary.skipped}." if summary.skipped else "."),
+            + (f"; skipped {summary.skipped}." if summary.skipped else ".")
+            + f" (last {lookback_days} day{'s' if lookback_days != 1 else ''})",
             "success",
         )
         return redirect(url_for("index", tab="expenses"))

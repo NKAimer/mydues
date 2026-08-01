@@ -417,7 +417,28 @@ input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--accent) 
 .btn.subtle { background: transparent; color: var(--muted); }
 a.btn { display: inline-block; text-decoration: none; }
 
-.masthead-actions { display: flex; align-items: center; gap: 8px; }
+.masthead-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.expense-fetch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.days-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.days-field input {
+  width: 4.5rem;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
 
 .setup { margin-top: 0; margin-bottom: 24px; border-color: var(--accent); }
 .setup p { margin: 10px 0 0; }

@@ -233,7 +233,8 @@ def test_parse_alert_skips_loan_offers():
 
 
 def test_alert_query_requires_transaction_subjects_and_skips_loans():
-    query = expense_ingest.build_alert_query(90)
+    query = expense_ingest.build_alert_query(7)
+    assert "newer_than:7d" in query
     assert 'subject:"transaction alert"' in query
     assert 'subject:"debited"' in query
     assert 'subject:"upi"' in query
@@ -329,6 +330,20 @@ def test_expenses_tab_shows_refresh_affordance(client, monkeypatch):
     monkeypatch.setattr(gmail, "is_connected", lambda: True)
     page = client.get("/?tab=expenses").get_data(as_text=True)
     assert "Refresh descriptions from Gmail" in page
+    assert 'name="days"' in page
+    assert 'value="7"' in page
+    assert "Fetch expense alerts" in page
+
+
+def test_parse_lookback_days_defaults_and_clamps():
+    from carddues.web.app import _parse_lookback_days
+
+    assert _parse_lookback_days(None) == 7
+    assert _parse_lookback_days("") == 7
+    assert _parse_lookback_days("14") == 14
+    assert _parse_lookback_days("0") == 1
+    assert _parse_lookback_days("9999") == 400
+    assert _parse_lookback_days("nope") == 7
 
 
 def test_expenses_tab_and_manual_add(client, conn):
