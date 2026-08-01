@@ -53,6 +53,13 @@ class DueView:
         return round(sum(txn.signed_amount for txn in self.transactions), 2)
 
     @property
+    def category_spend_totals(self) -> list[tuple[str, float]]:
+        """Debit spend by category for the statement being shown."""
+        from .categories import category_spend_totals
+
+        return category_spend_totals(self.transactions)
+
+    @property
     def transactions_missing(self) -> bool:
         """True when the bill looks active but no line items were stored."""
         from .parse_quality import transactions_missing_for_record

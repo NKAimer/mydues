@@ -39,6 +39,7 @@ KIND_CREDIT = "credit"
 # Whether a category was printed by the issuer or worked out from the merchant.
 CATEGORY_STATEMENT = "statement"
 CATEGORY_GUESS = "guess"
+CATEGORY_USER = "user"
 
 
 @dataclass

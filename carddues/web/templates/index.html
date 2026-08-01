@@ -68,6 +68,13 @@
       <span class="stat-label">Spent in {{ expense_month_label }}</span>
       <span class="stat-value">{{ expense_total | inr }}</span>
       <span class="stat-foot">{{ expenses | length }} entr{{ 'y' if expenses|length == 1 else 'ies' }}</span>
+      {% if expense_category_totals %}
+        <ul class="category-totals">
+          {% for label, amount in expense_category_totals %}
+            <li><span class="cat-label">{{ label }}</span> <span class="cat-amount">{{ amount | inr }}</span></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
     </div>
   </section>
 
@@ -326,6 +333,13 @@
               <span class="show-open">Hide transactions</span>
               <span class="count">{{ view.transactions | length }}</span>
             </summary>
+            {% if view.category_spend_totals %}
+              <ul class="category-totals">
+                {% for label, amount in view.category_spend_totals %}
+                  <li><span class="cat-label">{{ label }}</span> <span class="cat-amount">{{ amount | inr }}</span></li>
+                {% endfor %}
+              </ul>
+            {% endif %}
             <div class="scroll">
               <table>
                 <thead>
@@ -346,6 +360,18 @@
                           {{ txn.category }}
                           {% if txn.category_source == 'guess' %}<span class="badge">guess</span>{% endif %}
                         {% else %}—{% endif %}
+                        <details class="txn-edit">
+                          <summary class="btn subtle">Edit</summary>
+                          <form method="post" action="{{ url_for('edit_transaction_category', txn_id=txn.id) }}" class="grid-form">
+                            {% if not view.is_latest and view.record %}
+                              <input type="hidden" name="statement" value="{{ view.record.id }}">
+                            {% endif %}
+                            <label>Category
+                              <input type="text" name="category" value="{{ txn.category or '' }}" placeholder="optional">
+                            </label>
+                            <button class="btn primary" type="submit">Save</button>
+                          </form>
+                        </details>
                       </td>
                       <td class="num{{ ' credit' if txn.is_credit }}">{{ txn.signed_amount | inr }}</td>
                     </tr>

@@ -9,7 +9,7 @@ from datetime import date, datetime
 from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
 
 from .. import config, db, dues, expense_ingest, gmail, ingest, issuers
-from ..categories import remember_merchant_category
+from ..categories import category_spend_totals, remember_merchant_category
 from ..dues import format_inr
 from ..models import SOURCE_MANUAL, Card, Expense, StatementRecord
 
@@ -255,6 +255,7 @@ def create_app() -> Flask:
             callback_uri=_callback_uri(),
             expenses=expenses,
             expense_total=expense_total,
+            expense_category_totals=category_spend_totals(expenses),
             expense_month=month_start,
             expense_month_key=month_start.strftime("%Y-%m"),
             expense_month_label=month_start.strftime("%B %Y"),
@@ -690,6 +691,24 @@ def create_app() -> Flask:
             remember_merchant_category(conn, description, category)
         flash(f"Updated {format_inr(amount)} — {description}.", "success")
         return redirect(url_for("index", tab="expenses", month=month_key))
+
+    @app.post("/transactions/<int:txn_id>/category")
+    def edit_transaction_category(txn_id: int):
+        conn = db.connect()
+        db.init(conn)
+        category = (request.form.get("category") or "").strip() or None
+        updated = db.update_transaction_category(conn, txn_id, category)
+        if updated is None:
+            flash("That transaction is gone.", "error")
+            return redirect(url_for("index"))
+
+        txn, card_id = updated
+        if category:
+            remember_merchant_category(conn, txn.description, category)
+
+        statement_id = request.form.get("statement", type=int)
+        target = url_for("index", statement=statement_id) if statement_id else url_for("index")
+        return redirect(f"{target}#card-{card_id}")
 
     @app.post("/expenses/<int:expense_id>/delete")
     def delete_expense(expense_id: int):

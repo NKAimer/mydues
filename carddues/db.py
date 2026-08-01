@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterable
 
 from . import config
-from .models import Card, Expense, StatementRecord, Transaction
+from .models import CATEGORY_USER, Card, Expense, StatementRecord, Transaction
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -533,6 +533,38 @@ def transactions_for_statement(conn: sqlite3.Connection, statement_id: int) -> l
         )
         for row in rows
     ]
+
+
+def update_transaction_category(
+    conn: sqlite3.Connection, txn_id: int, category: str | None
+) -> tuple[Transaction, int] | None:
+    """Set category (NULL if cleared) and category_source to user / NULL.
+
+    Returns `(txn, card_id)` so the route can teach merchant memory and redirect
+    to `#card-{id}`, or None if the row is missing.
+    """
+    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (txn_id,)).fetchone()
+    if row is None:
+        return None
+    category = (category or "").strip() or None
+    source = CATEGORY_USER if category else None
+    conn.execute(
+        "UPDATE transactions SET category = ?, category_source = ? WHERE id = ?",
+        (category, source, txn_id),
+    )
+    conn.commit()
+    return (
+        Transaction(
+            id=row["id"],
+            txn_date=_as_date(row["txn_date"]),
+            description=row["description"],
+            amount=row["amount"],
+            kind=row["kind"],
+            category=category,
+            category_source=source,
+        ),
+        int(row["card_id"]),
+    )
 
 
 def add_payment(

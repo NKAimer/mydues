@@ -133,6 +133,46 @@ body {
 }
 .expense-edit .grid-form { margin-top: 8px; }
 
+.txn-edit {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: baseline;
+  text-align: left;
+}
+.txn-edit > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 1px 6px;
+}
+.txn-edit > summary::-webkit-details-marker { display: none; }
+.txn-edit[open] {
+  display: block;
+  margin: 6px 0 0;
+  min-width: min(220px, 60vw);
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.txn-edit .grid-form { margin-top: 0; gap: 6px; }
+
+.category-totals {
+  list-style: none;
+  margin: 8px 0 10px;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.stat .category-totals { margin: 6px 0 0; }
+.category-totals .cat-amount {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 h1, h2 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 h1 { font-size: 26px; }
 h2 { font-size: 17px; }
@@ -272,6 +312,7 @@ h2 { font-size: 17px; }
 .txns summary .show-open { display: none; }
 .txns[open] summary .show-open { display: inline; }
 .txns[open] summary .show-closed { display: none; }
+.txns .category-totals { padding: 0 2px; }
 .txns .scroll { overflow-x: auto; }
 .txns table {
   width: 100%;

@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections import defaultdict
 from datetime import datetime
+from typing import Iterable
 
 from .models import CATEGORY_GUESS, CATEGORY_STATEMENT
+
+UNCATEGORIZED = "Uncategorized"
 
 # Merchants an Indian card / UPI alert sees, grouped like a spend summary.
 # Only used when the issuer prints no category and merchant memory has no hit.
@@ -244,6 +248,24 @@ def remember_merchant_category(
         (key, category, datetime.now().isoformat(timespec="seconds")),
     )
     conn.commit()
+
+
+def category_spend_totals(items: Iterable) -> list[tuple[str, float]]:
+    """Debit spend by category, largest first. Blank category → Uncategorized.
+
+    Credits are ignored. The Uncategorized label is display-only and is never
+    written back to storage.
+    """
+    totals: dict[str, float] = defaultdict(float)
+    for item in items:
+        if getattr(item, "is_credit", False):
+            continue
+        label = (getattr(item, "category", None) or "").strip() or UNCATEGORIZED
+        totals[label] += float(item.amount)
+    return sorted(
+        ((label, round(amount, 2)) for label, amount in totals.items()),
+        key=lambda pair: (-pair[1], pair[0]),
+    )
 
 
 def resolve_category(
