@@ -19,10 +19,19 @@ from carddues import issuers
         ("statements@rbl.bank.in", "rbl"),
         ("alert@au.bank.in", "au"),
         ("estatement@federal.bank.in", "federal"),
+        ("HSBC India <creditcardstatement@mail.hsbc.co.in>", "hsbc"),
     ],
 )
 def test_bank_in_senders_detect_to_issuer(sender, expected):
     assert issuers.detect_from_sender(sender) == expected
+
+
+def test_hsbc_is_a_registered_issuer():
+    entry = issuers.get("hsbc")
+    assert entry.key == "hsbc"
+    assert "mail.hsbc.co.in" in entry.senders
+    assert issuers.detect("HSBC LIVE+ CREDIT CARD Statement") == "hsbc"
+    assert "mail.hsbc.co.in" in issuers.all_senders()
 
 
 def test_bank_in_domains_are_registered_alongside_legacy():

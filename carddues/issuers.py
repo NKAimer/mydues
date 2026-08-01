@@ -69,6 +69,13 @@ ISSUERS: dict[str, Issuer] = {
         markers=("american express", "amex"),
         password_hint="Often card digits combined with date of birth.",
     ),
+    "hsbc": Issuer(
+        key="hsbc",
+        name="HSBC",
+        senders=("mail.hsbc.co.in", "hsbc.co.in", "hsbc.com"),
+        markers=("hsbc", "hsbc live"),
+        password_hint="Date of birth in DDMMYY followed by the last 6 digits of the primary card.",
+    ),
     "indusind": Issuer(
         key="indusind",
         name="IndusInd Bank",

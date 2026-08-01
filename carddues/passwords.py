@@ -93,7 +93,7 @@ _NAME_PLAIN = re.compile(rf"(?:your\s+|the\s+)?(?P<which>first\s+name|given\s+na
 _NAME_BARE = re.compile(r"your\s+(?P<which>name)\b")
 _CARD_DIGITS = re.compile(
     rf"(?P<end>last|first)\s+(?P<count>{_COUNT})\s+digits?\s*(?:of\s+)?(?:the\s+|your\s+)?"
-    r"(?:credit\s+|debit\s+)?(?:card|account)"
+    r"(?:primary\s+)?(?:credit\s+|debit\s+)?(?:card|account)"
 )
 _DOB_WORDS = re.compile(r"date\s+of\s+birth|birth\s*date|\bdob\b|birthday")
 _FORMAT_TOKEN = re.compile(r"\b(?:d{2}|m{2}|y{2,4})(?:[\s/.-]?(?:d{2}|m{2}|y{2,4}))*\b")
@@ -210,10 +210,16 @@ def _options(slot: _Slot, card: Card, casings: list) -> list[str]:
         return [case(fragment) for case in casings] if fragment else []
 
     if slot.kind == "digits":
-        # Only the last four are on file, so a rule needing more is unknowable.
-        if not card.last4 or slot.which != "last" or not slot.count or slot.count > 4:
+        if slot.which != "last" or not slot.count:
             return []
-        return [card.last4[-slot.count :]]
+        # last4 covers rules of up to four digits; longer runs (HSBC last 6)
+        # need the extra digits stored on the card as `pan`.
+        if slot.count <= 4 and card.last4:
+            return [card.last4[-slot.count :]]
+        source = re.sub(r"\D", "", card.pan or "")
+        if len(source) >= slot.count:
+            return [source[-slot.count :]]
+        return []
 
     if slot.kind == "dob":
         if not card.dob:

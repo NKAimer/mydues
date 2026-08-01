@@ -73,6 +73,18 @@ def test_a_rule_needing_digits_we_do_not_hold_is_refused():
     assert derive(hint) == []
 
 
+def test_hsbc_rule_uses_dob_and_last_six_digits_from_pan():
+    """HSBC: DDMMYY + last 6 of the primary card (store those six on `pan`)."""
+    card = make_card(dob=date(1970, 6, 2), pan="004200", last4="4200")
+    hint = (
+        "Password protection: Your password is a combination of your date of birth "
+        "(in DDMMYY format) followed by the last 6 digits of the primary credit card number. "
+        "For example: If your primary credit card number is 5120 0000 0000 4200 and your "
+        "birth date is 2 June 1970, then the password is 020670004200."
+    )
+    assert derive(hint, card) == ["020670004200"]
+
+
 def test_a_card_missing_the_details_is_skipped():
     hint = "Password is the first 4 letters of your name and date of birth in DDMM."
     assert derive(hint, make_card(name=None, dob=None)) == []

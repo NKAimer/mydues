@@ -113,6 +113,19 @@ class AmexParser(StatementParser):
     )
 
 
+class HsbcParser(StatementParser):
+    key = "hsbc"
+    issuer_key = "hsbc"
+    labels = _labels(
+        total_due=("Total Dues", "Total Amount Due", "Total Amount Payable"),
+        min_due=("Minimum Amount Due", "Minimum Payment Due"),
+        due_date=("Payment Due Date",),
+        statement_date=("Statement Date", "Statement Period"),
+        credit_limit=("Credit Limit", "Your Credit Limit"),
+        available_credit=("Available Credit", "Available Credit Limit"),
+    )
+
+
 class IndusIndParser(StatementParser):
     key = "indusind"
     issuer_key = "indusind"

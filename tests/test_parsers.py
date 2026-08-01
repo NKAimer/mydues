@@ -128,6 +128,18 @@ def test_amex_new_balance_wording():
     assert result.statement_date == date(2026, 7, 20)
 
 
+def test_hsbc_inline_layout():
+    result = parse(fixtures.HSBC_INLINE)
+
+    assert result is not None
+    assert result.issuer == "hsbc"
+    assert result.total_due == pytest.approx(18450.00)
+    assert result.min_due == pytest.approx(920.00)
+    assert result.due_date == date(2026, 8, 11)
+    assert result.statement_date == date(2026, 7, 22)
+    assert result.last4 == "4200"
+
+
 def test_credit_balance_is_negative():
     result = parse(fixtures.CREDIT_BALANCE)
     assert result.issuer == "kotak"

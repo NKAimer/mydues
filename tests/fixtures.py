@@ -249,6 +249,18 @@ Payment Due Date August 8, 2026
 Total Credit Limit 12,00,000.00
 """
 
+HSBC_INLINE = """
+HSBC Credit Card Statement
+HSBC LIVE+ CREDIT CARD
+Card Number 5120 XXXX XXXX 4200
+Statement Date 22/07/2026
+Payment Due Date 11/08/2026
+Total Dues 18,450.00
+Minimum Amount Due 920.00
+Credit Limit 2,50,000.00
+Available Credit 2,31,550.00
+"""
+
 CREDIT_BALANCE = """
 Kotak Mahindra Bank Credit Card Statement
 Statement Date: 01-07-2026
