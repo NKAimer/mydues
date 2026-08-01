@@ -12,6 +12,7 @@ from datetime import date, datetime
 from html import unescape
 
 from . import db, gmail
+from .categories import resolve_category
 from .ingest import ProgressCallback, ProgressEvent
 from .models import SOURCE_GMAIL, Expense
 from .text import parse_amount, parse_date
@@ -39,6 +40,15 @@ ALERT_SUBJECT_HINTS = (
     "transaction of rs",
     "transaction of inr",
     "purchase",
+    # UPI spend alerts (PhonePe / GPay / bank UPI notifications).
+    "upi",
+    "upi alert",
+    "upi transaction",
+    "upi payment",
+    "upi txn",
+    "paid via upi",
+    "sent using upi",
+    "sent via upi",
 )
 
 # Full statement subjects — never treat these as expenses.
@@ -227,7 +237,19 @@ def parse_alert_email(
     # Prefer debit-style alerts; skip pure credit/refund wording when no debit cue.
     creditish = any(w in subject_l for w in ("credited", "received", "refund", "cashback"))
     debitish = any(
-        w in subject_l for w in ("spent", "debited", "debit", "paid", "purchase", "txn", "transaction")
+        w in subject_l
+        for w in (
+            "spent",
+            "debited",
+            "debit",
+            "paid",
+            "purchase",
+            "txn",
+            "transaction",
+            "upi",
+            "sent using",
+            "sent via",
+        )
     )
     if creditish and not debitish:
         return None
@@ -251,13 +273,14 @@ def parse_alert_email(
     merchant = _extract_merchant(blob)
     description = merchant or _clean_subject(subject)
     note = _short_note(subject=subject, body_plain=body_plain, description=description)
+    category, _source = resolve_category(description, note=note, conn=None)
 
     return Expense(
         spent_on=spent_on,
         amount=amount,
         description=description,
         source=SOURCE_GMAIL,
-        category=None,
+        category=category,
         note=note,
     )
 
@@ -307,6 +330,11 @@ def ingest_expense_alerts(
                 ),
             )
             continue
+
+        category, _source = resolve_category(
+            expense.description, note=expense.note, conn=conn
+        )
+        expense.category = category
 
         expense.source_ref = message_id
         expense_id = db.add_expense(conn, expense)

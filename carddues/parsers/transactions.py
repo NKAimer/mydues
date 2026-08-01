@@ -11,191 +11,12 @@ from __future__ import annotations
 
 import re
 
-from ..models import (
-    CATEGORY_GUESS,
-    CATEGORY_STATEMENT,
-    KIND_CREDIT,
-    KIND_DEBIT,
-    Transaction,
-)
+from ..categories import categorise, resolve_category
+from ..models import KIND_CREDIT, KIND_DEBIT, Transaction
 from ..text import AMOUNT_RE, DATE_RE, parse_amount, parse_date
 
-# Merchants an Indian card sees, grouped the way a spend summary would group
-# them. Only consulted when the statement prints no category of its own, and
-# what it produces is recorded as a guess.
-CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "Payment received": (
-        "payment received",
-        "payment - thank",
-        "thank you",
-        "payment credit",
-        "auto debit received",
-        "neft cr",
-    ),
-    "Fees & interest": (
-        "interest",
-        "finance charge",
-        "late payment",
-        "annual fee",
-        "joining fee",
-        "membership fee",
-        "surcharge",
-        "markup",
-        "penalty",
-        "gst",
-        "igst",
-        "cgst",
-    ),
-    "Cash & transfers": (
-        "atm",
-        "cash withdrawal",
-        "cash advance",
-        "imps",
-        "neft",
-        "rtgs",
-        "upi",
-    ),
-    "Food & dining": (
-        "swiggy",
-        "zomato",
-        "restaurant",
-        "cafe",
-        "coffee",
-        "starbucks",
-        "domino",
-        "pizza",
-        "mcdonald",
-        "kfc",
-        "burger",
-        "barbeque",
-        "biryani",
-        "bakery",
-        "eatclub",
-        "eatfit",
-    ),
-    "Groceries": (
-        "bigbasket",
-        "blinkit",
-        "zepto",
-        "instamart",
-        "dmart",
-        "d-mart",
-        "reliance fresh",
-        "supermarket",
-        "grocer",
-        "kirana",
-        "licious",
-        "country delight",
-    ),
-    "Travel": (
-        "uber",
-        "ola ",
-        "olacabs",
-        "rapido",
-        "irctc",
-        "indigo",
-        "air india",
-        "vistara",
-        "spicejet",
-        "akasa",
-        "makemytrip",
-        "goibibo",
-        "yatra",
-        "cleartrip",
-        "redbus",
-        "ixigo",
-        "oyo",
-        "airbnb",
-        "hotel",
-        "resort",
-        "railway",
-        "metro",
-        "airport",
-        "airlines",
-        "travel",
-    ),
-    "Fuel": (
-        "petrol",
-        "fuel",
-        "hpcl",
-        "iocl",
-        "bpcl",
-        "indian oil",
-        "bharat petroleum",
-        "hp pay",
-        "shell ",
-        "nayara",
-        "jio-bp",
-    ),
-    "Bills & utilities": (
-        "electricity",
-        "recharge",
-        "airtel",
-        "jio ",
-        "vodafone",
-        "bsnl",
-        "broadband",
-        "fibernet",
-        "tata power",
-        "bescom",
-        "gas bill",
-        "water bill",
-        "bill payment",
-        "billdesk",
-        "insurance",
-        "premium",
-        "policybazaar",
-    ),
-    "Entertainment": (
-        "netflix",
-        "prime video",
-        "hotstar",
-        "spotify",
-        "youtube",
-        "bookmyshow",
-        "pvr",
-        "inox",
-        "sonyliv",
-        "zee5",
-        "jiocinema",
-        "google play",
-        "apple.com/bill",
-        "steam",
-        "playstation",
-    ),
-    "Health": (
-        "pharmacy",
-        "pharmeasy",
-        "apollo",
-        "1mg",
-        "netmeds",
-        "hospital",
-        "clinic",
-        "diagnostic",
-        "practo",
-        "cult.fit",
-    ),
-    "Shopping": (
-        "amazon",
-        "flipkart",
-        "myntra",
-        "ajio",
-        "nykaa",
-        "meesho",
-        "tatacliq",
-        "tata cliq",
-        "croma",
-        "reliance digital",
-        "decathlon",
-        "ikea",
-        "lifestyle",
-        "westside",
-        "zara",
-        "uniqlo",
-        "shoppers stop",
-        "pantaloons",
-    ),
-}
+# Re-exported for parsers/__init__.py and tests that use txns.categorise.
+__all__ = ["categorise", "extract_transactions", "from_lines", "from_tables"]
 
 # What a column header has to contain for its column to be recognised.
 _COLUMN_MARKERS: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -218,25 +39,6 @@ _SUMMARY = re.compile(
     r"|^balance\b|^amount\s+due",
     re.IGNORECASE,
 )
-
-
-def categorise(description: str) -> str | None:
-    """A coarse category worked out from the merchant name."""
-    lowered = f" {description.lower()} "
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        if any(keyword in lowered for keyword in keywords):
-            return category
-    return None
-
-
-def _with_category(
-    description: str, printed: str | None
-) -> tuple[str | None, str | None]:
-    """The category to store, and whether the statement or we came up with it."""
-    if printed and _LETTERS.search(printed):
-        return printed.strip(), CATEGORY_STATEMENT
-    guess = categorise(description)
-    return (guess, CATEGORY_GUESS) if guess else (None, None)
 
 
 def _clean(value: str) -> str:
@@ -263,7 +65,7 @@ def _transaction(
         return None
 
     credit = amount < 0 or bool(re.search(r"\bcr\b", raw_amount, re.IGNORECASE))
-    category, source = _with_category(description, printed_category)
+    category, source = resolve_category(description, printed=printed_category)
     return Transaction(
         description=description,
         amount=abs(amount),

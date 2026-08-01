@@ -100,6 +100,12 @@ CREATE TABLE IF NOT EXISTS expenses (
 CREATE UNIQUE INDEX IF NOT EXISTS expenses_source_ref
     ON expenses (source, source_ref)
     WHERE source_ref IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS merchant_categories (
+    merchant_key TEXT PRIMARY KEY,
+    category TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 # Columns added after the first release. SQLite cannot express these with

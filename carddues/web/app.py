@@ -9,6 +9,7 @@ from datetime import date, datetime
 from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
 
 from .. import config, db, dues, expense_ingest, gmail, ingest, issuers
+from ..categories import remember_merchant_category
 from ..dues import format_inr
 from ..models import SOURCE_MANUAL, Card, Expense, StatementRecord
 
@@ -685,6 +686,8 @@ def create_app() -> Flask:
             category=category,
             note=note,
         )
+        if category:
+            remember_merchant_category(conn, description, category)
         flash(f"Updated {format_inr(amount)} — {description}.", "success")
         return redirect(url_for("index", tab="expenses", month=month_key))
 
