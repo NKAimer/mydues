@@ -39,6 +39,100 @@ body {
   padding: 32px 24px 64px;
 }
 
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 20px;
+  border-bottom: 1px solid var(--line);
+}
+.tab {
+  padding: 10px 16px;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.month-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.month-nav h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.expense-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.expense-table th,
+.expense-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.expense-table th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.expense-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.expense-table .pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.expense-note {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+  max-width: 36em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.expense-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.expense-edit {
+  text-align: left;
+}
+.expense-edit > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.expense-edit > summary::-webkit-details-marker { display: none; }
+.expense-edit[open] {
+  min-width: min(320px, 70vw);
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.expense-edit .grid-form { margin-top: 8px; }
+
 h1, h2 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 h1 { font-size: 26px; }
 h2 { font-size: 17px; }
@@ -328,3 +422,56 @@ footer {
   font-size: 12px;
 }
 footer a { color: var(--accent); }
+
+.progress-dialog {
+  border: none;
+  padding: 0;
+  background: transparent;
+  max-width: min(420px, calc(100vw - 32px));
+}
+.progress-dialog::backdrop {
+  background: color-mix(in srgb, var(--bg, #0f1115) 55%, transparent);
+  backdrop-filter: blur(2px);
+}
+.progress-card {
+  padding: 22px 24px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 18px 40px color-mix(in srgb, #000 28%, transparent);
+}
+.progress-card h2 {
+  margin: 0 0 10px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.progress-file {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+.progress-count {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--line) 80%, var(--surface));
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.progress-status {
+  margin: 10px 0 0;
+  min-height: 1.2em;
+  font-size: 12px;
+  color: var(--muted);
+}

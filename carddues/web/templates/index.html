@@ -15,18 +15,31 @@
       <p class="sub">{{ today.strftime('%A, %d %B %Y') }}</p>
     </div>
     <div class="masthead-actions">
-      {% if gmail_connected %}
-        <form method="post" action="{{ url_for('run_ingest') }}">
-          <button class="btn primary" type="submit">Fetch from Gmail</button>
-        </form>
-        <form method="post" action="{{ url_for('reparse_parsed') }}">
-          <button class="btn" type="submit">Re-parse statements</button>
-        </form>
-        <form method="post" action="{{ url_for('auth_disconnect') }}">
-          <button class="btn subtle" type="submit">Disconnect Gmail</button>
-        </form>
+      {% if tab == 'expenses' %}
+        {% if gmail_connected %}
+          <form method="post" action="{{ url_for('fetch_expenses') }}" class="js-progress-form" data-job="expenses" data-title="Fetching expense alerts">
+            <button class="btn primary" type="submit">Fetch expense alerts</button>
+          </form>
+          <form method="post" action="{{ url_for('auth_disconnect') }}">
+            <button class="btn subtle" type="submit">Disconnect Gmail</button>
+          </form>
+        {% else %}
+          <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
+        {% endif %}
       {% else %}
-        <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
+        {% if gmail_connected %}
+          <form method="post" action="{{ url_for('run_ingest') }}" class="js-progress-form" data-job="fetch" data-title="Fetching statements">
+            <button class="btn primary" type="submit">Fetch from Gmail</button>
+          </form>
+          <form method="post" action="{{ url_for('reparse_parsed') }}" class="js-progress-form" data-job="reparse" data-title="Re-parsing statements">
+            <button class="btn" type="submit">Re-parse statements</button>
+          </form>
+          <form method="post" action="{{ url_for('auth_disconnect') }}">
+            <button class="btn subtle" type="submit">Disconnect Gmail</button>
+          </form>
+        {% else %}
+          <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
+        {% endif %}
       {% endif %}
     </div>
   </header>
@@ -40,6 +53,119 @@
       </div>
     {% endif %}
   {% endwith %}
+
+  <nav class="tabs" aria-label="Main">
+    <a class="tab {% if tab != 'expenses' %}active{% endif %}"
+       href="{{ url_for('index', tab='cards') }}">Credit cards</a>
+    <a class="tab {% if tab == 'expenses' %}active{% endif %}"
+       href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">Expenses</a>
+  </nav>
+
+  {% if tab == 'expenses' %}
+
+  <section class="summary">
+    <div class="stat">
+      <span class="stat-label">Spent in {{ expense_month_label }}</span>
+      <span class="stat-value">{{ expense_total | inr }}</span>
+      <span class="stat-foot">{{ expenses | length }} entr{{ 'y' if expenses|length == 1 else 'ies' }}</span>
+    </div>
+  </section>
+
+  <section class="panel expenses-month">
+    <div class="month-nav">
+      <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_prev_month) }}">← Prev</a>
+      <h2>{{ expense_month_label }}</h2>
+      <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_next_month) }}">Next →</a>
+    </div>
+
+    {% if expenses %}
+      <table class="expense-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Description</th>
+            <th>Category</th>
+            <th class="num">Amount</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for expense in expenses %}
+            <tr>
+              <td>{{ expense.spent_on | dmy }}</td>
+              <td>
+                {{ expense.description }}
+                {% if expense.source == 'gmail' %}<span class="pill muted">gmail</span>{% endif %}
+                {% if expense.note and expense.note != expense.description %}
+                  <div class="expense-note">{{ expense.note }}</div>
+                {% endif %}
+              </td>
+              <td>{{ expense.category or '—' }}</td>
+              <td class="num">{{ expense.amount | inr }}</td>
+              <td class="expense-actions">
+                <details class="expense-edit">
+                  <summary class="btn subtle">Edit</summary>
+                  <form method="post" action="{{ url_for('edit_expense', expense_id=expense.id) }}" class="grid-form">
+                    <label>Date
+                      <input type="text" name="spent_on" inputmode="numeric"
+                             value="{{ expense.spent_on | dmy }}"
+                             pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}">
+                    </label>
+                    <label>Amount
+                      <input type="text" name="amount" inputmode="decimal"
+                             value="{{ '%.2f'|format(expense.amount) }}" required>
+                    </label>
+                    <label>Description
+                      <input type="text" name="description" value="{{ expense.description }}" required>
+                    </label>
+                    <label>Category
+                      <input type="text" name="category" value="{{ expense.category or '' }}" placeholder="optional">
+                    </label>
+                    <label>Note
+                      <input type="text" name="note" value="{{ expense.note or '' }}" placeholder="optional">
+                    </label>
+                    <button class="btn primary" type="submit">Save</button>
+                  </form>
+                </details>
+                <form method="post" action="{{ url_for('delete_expense', expense_id=expense.id) }}"
+                      onsubmit="return confirm('Delete this expense?')">
+                  <button class="btn danger" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="empty">No expenses for this month yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Add expense</h2>
+    <form method="post" action="{{ url_for('add_expense') }}" class="grid-form">
+      <label>Date
+        <input type="text" name="spent_on" inputmode="numeric"
+               placeholder="dd/mm/yyyy" value="{{ today | dmy }}"
+               pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}">
+      </label>
+      <label>Amount
+        <input type="text" name="amount" inputmode="decimal" placeholder="0.00" required>
+      </label>
+      <label>Description
+        <input type="text" name="description" placeholder="What was it for?" required>
+      </label>
+      <label>Category
+        <input type="text" name="category" placeholder="optional">
+      </label>
+      <label>Note
+        <input type="text" name="note" placeholder="optional">
+      </label>
+      <button class="btn primary" type="submit">Add expense</button>
+    </form>
+  </section>
+
+  {% else %}
 
   {% if not gmail_connected %}
     <section class="panel setup">
@@ -234,6 +360,8 @@
               </table>
             </div>
           </details>
+        {% elif view.transactions_missing %}
+          <p class="txns-missing">Transactions not read for this statement. Run <code>carddues reparse</code> after a parser fix, or <code>carddues audit</code>.</p>
         {% endif %}
 
         <div class="actions">
@@ -300,7 +428,7 @@
         {% endif %}
       </h2>
       {% if gmail_connected %}
-        <form method="post" action="{{ url_for('reprocess_pending') }}" class="reopen">
+        <form method="post" action="{{ url_for('reprocess_pending') }}" class="reopen js-progress-form" data-job="reprocess" data-title="Retrying waiting attachments">
           <button class="btn" type="submit">Try these again</button>
           <span class="sub">with the card details on file now</span>
         </form>
@@ -394,10 +522,26 @@
     </details>
   </section>
 
+  {% endif %}
+
   <footer>
     <span>Everything stays on this machine. Gmail access is read-only.</span>
     <a href="{{ url_for('api_dues') }}">JSON</a>
   </footer>
 </div>
+
+<dialog class="progress-dialog" id="progress-dialog" aria-labelledby="progress-title">
+  <div class="progress-card">
+    <h2 id="progress-title">Working…</h2>
+    <p class="progress-file" id="progress-file">Preparing…</p>
+    <p class="progress-count" id="progress-count"></p>
+    <div class="progress-track" aria-hidden="true">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+    <p class="progress-status" id="progress-status"></p>
+  </div>
+</dialog>
+
+<script src="{{ url_for('static', filename='progress.js') }}"></script>
 </body>
 </html>

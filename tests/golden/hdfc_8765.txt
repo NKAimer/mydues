@@ -1,0 +1,12 @@
+HDFC Bank Credit Card Statement
+Name: NAVEEN KUMAR
+Card No: 4321 XXXX XXXX 8765
+
+Statement Date Payment Due Date Total Dues Minimum Amount Due
+05/07/2026 25/07/2026 45,231.50 2,270.00
+
+Credit Limit Available Credit Limit Available Cash Limit
+5,00,000.00 4,54,768.50 1,00,000.00
+
+Domestic Transactions
+02/07/2026 SWIGGY BANGALORE 640.00

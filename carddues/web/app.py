@@ -6,11 +6,11 @@ import logging
 import re
 from datetime import date, datetime
 
-from flask import Flask, flash, redirect, render_template, request, session, url_for
+from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
 
-from .. import config, db, dues, gmail, ingest, issuers
+from .. import config, db, dues, expense_ingest, gmail, ingest, issuers
 from ..dues import format_inr
-from ..models import SOURCE_MANUAL, Card, StatementRecord
+from ..models import SOURCE_MANUAL, Card, Expense, StatementRecord
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +134,42 @@ def _as_datetime(value: str | None) -> datetime | None:
         return None
 
 
+def _parse_month(value: str | None) -> date:
+    """First day of YYYY-MM, or the current month."""
+    today = date.today()
+    if value:
+        try:
+            year_s, month_s = value.strip().split("-", 1)
+            year, month = int(year_s), int(month_s)
+            if 1 <= month <= 12:
+                return date(year, month, 1)
+        except ValueError:
+            pass
+    return date(today.year, today.month, 1)
+
+
+def _month_window(month_start: date) -> tuple[date, date]:
+    start = month_start.replace(day=1)
+    # Exclusive end = first of next month.
+    if month_start.month == 12:
+        end = date(month_start.year + 1, 1, 1)
+    else:
+        end = date(month_start.year, month_start.month + 1, 1)
+    return start, end
+
+
+def _shift_month(month_start: date, delta: int) -> date:
+    year = month_start.year
+    month = month_start.month + delta
+    while month < 1:
+        month += 12
+        year -= 1
+    while month > 12:
+        month -= 12
+        year += 1
+    return date(year, month, 1)
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     # Signs flash messages and the OAuth state in a single-user local session.
@@ -190,12 +226,23 @@ def create_app() -> Flask:
 
         conn = db.connect()
         db.init(conn)
+        tab = (request.args.get("tab") or "cards").strip().lower()
+        if tab not in {"cards", "expenses"}:
+            tab = "cards"
+
         # ?statement=<id> looks back at one earlier cycle; the rest stay latest.
         chosen = db.get_statement(conn, request.args.get("statement", type=int) or 0)
         book = dues.portfolio(conn, selected={chosen.card_id: chosen.id} if chosen else None)
+
+        month_start = _parse_month(request.args.get("month"))
+        month_end_exclusive = _month_window(month_start)[1]
+        expenses = db.list_expenses(conn, start=month_start, end=month_end_exclusive)
+        expense_total = db.expense_total(conn, start=month_start, end=month_end_exclusive)
+
         return render_template(
             "index.html",
             book=book,
+            tab=tab,
             status_labels=STATUS_LABELS,
             issuers=sorted(issuers.ISSUERS.values(), key=lambda i: i.name),
             today=date.today(),
@@ -205,6 +252,14 @@ def create_app() -> Flask:
             gmail_client_type=gmail.client_type(),
             credentials_path=config.credentials_path(),
             callback_uri=_callback_uri(),
+            expenses=expenses,
+            expense_total=expense_total,
+            expense_month=month_start,
+            expense_month_key=month_start.strftime("%Y-%m"),
+            expense_month_label=month_start.strftime("%B %Y"),
+            expense_prev_month=_shift_month(month_start, -1).strftime("%Y-%m"),
+            expense_next_month=_shift_month(month_start, 1).strftime("%Y-%m"),
+            expense_months=db.expense_months(conn),
         )
 
     @app.get("/auth/start")
@@ -373,6 +428,138 @@ def create_app() -> Flask:
         flash(message, "success")
         return redirect(url_for("index"))
 
+    @app.get("/ingest/stream")
+    def ingest_stream():
+        """Stream per-item progress for Fetch / Re-parse / Try again / Expenses."""
+        job = (request.args.get("job") or "").strip()
+        if job not in {"fetch", "reparse", "reprocess", "expenses"}:
+            return Response("Unknown job", status=400)
+
+        def event_stream():
+            import json
+            import queue
+            import threading
+
+            events: queue.Queue = queue.Queue()
+
+            def on_progress(event: ingest.ProgressEvent) -> None:
+                payload = {
+                    "type": "item" if event.status else "progress",
+                    "index": event.index,
+                    "total": event.total,
+                    "filename": event.filename,
+                    "phase": event.phase,
+                    "status": event.status,
+                    "detail": event.detail,
+                }
+                events.put(payload)
+
+            def run_job() -> None:
+                conn = db.connect()
+                try:
+                    db.init(conn)
+                    if job == "fetch":
+                        summary = ingest.ingest_gmail(
+                            conn, interactive=False, on_progress=on_progress
+                        )
+                        message = f"Parsed {summary.parsed} statement(s)."
+                        if summary.needs_attention:
+                            message += (
+                                f" {len(summary.needs_attention)} attachment(s) need attention."
+                            )
+                        done_total = len(summary.results)
+                        done_parsed = summary.parsed
+                        done_remaining = summary.remaining
+                    elif job == "reparse":
+                        if not gmail.is_connected():
+                            raise gmail.GmailNotConfigured(
+                                "Connect Gmail first so the statements can be fetched again."
+                            )
+                        summary = ingest.reparse_parsed(
+                            conn, interactive=False, on_progress=on_progress
+                        )
+                        if not summary.results:
+                            message = "No parsed statements to re-read."
+                        else:
+                            message = (
+                                f"Re-parsed {summary.parsed} of {len(summary.results)} "
+                                "statement(s)."
+                            )
+                            if summary.remaining:
+                                message += f" {summary.remaining} still to re-read."
+                        done_total = len(summary.results)
+                        done_parsed = summary.parsed
+                        done_remaining = summary.remaining
+                    elif job == "expenses":
+                        if not gmail.is_connected():
+                            raise gmail.GmailNotConfigured(
+                                "Connect Gmail first so expense alerts can be fetched."
+                            )
+                        summary = expense_ingest.ingest_expense_alerts(
+                            conn, interactive=False, on_progress=on_progress
+                        )
+                        message = (
+                            f"Added {summary.added} expense(s) from Gmail"
+                            + (f"; skipped {summary.skipped}." if summary.skipped else ".")
+                        )
+                        done_total = len(summary.results)
+                        done_parsed = summary.added
+                        done_remaining = 0
+                    else:
+                        if not gmail.is_connected():
+                            raise gmail.GmailNotConfigured(
+                                "Connect Gmail first so the attachments can be fetched again."
+                            )
+                        summary = ingest.reprocess_pending(
+                            conn, interactive=False, on_progress=on_progress
+                        )
+                        message = (
+                            f"Opened {summary.parsed} of {len(summary.results)} "
+                            "waiting attachment(s)."
+                            if summary.results
+                            else "Nothing is waiting to be opened."
+                        )
+                        if summary.remaining:
+                            message += f" {summary.remaining} still waiting."
+                        done_total = len(summary.results)
+                        done_parsed = summary.parsed
+                        done_remaining = summary.remaining
+                    events.put(
+                        {
+                            "type": "done",
+                            "parsed": done_parsed,
+                            "total": done_total,
+                            "remaining": done_remaining,
+                            "message": message,
+                        }
+                    )
+                except gmail.GmailNotConfigured as exc:
+                    events.put({"type": "error", "message": str(exc)})
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("Streaming %s failed", job)
+                    events.put({"type": "error", "message": str(exc)})
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    events.put(None)
+
+            threading.Thread(target=run_job, daemon=True).start()
+            while True:
+                item = events.get()
+                if item is None:
+                    break
+                yield f"data: {json.dumps(item)}\n\n"
+
+        response = Response(
+            stream_with_context(event_stream()),
+            mimetype="text/event-stream",
+        )
+        response.headers["Cache-Control"] = "no-cache"
+        response.headers["X-Accel-Buffering"] = "no"
+        return response
+
     @app.post("/ingest/reprocess")
     def reprocess_pending():
         """Work through the backlog a batch at a time."""
@@ -436,5 +623,108 @@ def create_app() -> Flask:
         else:
             flash(f"{filename}: {result.detail}", "error")
         return redirect(url_for("index"))
+
+    @app.post("/expenses")
+    def add_expense():
+        conn = db.connect()
+        db.init(conn)
+        form = request.form
+        amount = _parse_amount(form.get("amount"))
+        spent_on = _parse_date(form.get("spent_on")) or date.today()
+        description = (form.get("description") or "").strip()
+        category = (form.get("category") or "").strip() or None
+        note = (form.get("note") or "").strip() or None
+        month_key = spent_on.strftime("%Y-%m")
+
+        if amount is None or amount <= 0 or not description:
+            flash("Enter an amount and a short description.", "error")
+            return redirect(url_for("index", tab="expenses", month=month_key))
+
+        db.add_expense(
+            conn,
+            Expense(
+                spent_on=spent_on,
+                amount=amount,
+                description=description,
+                category=category,
+                note=note,
+                source=SOURCE_MANUAL,
+            ),
+        )
+        flash(f"Added {format_inr(amount)} — {description}.", "success")
+        return redirect(url_for("index", tab="expenses", month=month_key))
+
+    @app.post("/expenses/<int:expense_id>/edit")
+    def edit_expense(expense_id: int):
+        conn = db.connect()
+        db.init(conn)
+        existing = db.get_expense(conn, expense_id)
+        form = request.form
+        amount = _parse_amount(form.get("amount"))
+        spent_on = _parse_date(form.get("spent_on")) or (existing.spent_on if existing else date.today())
+        description = (form.get("description") or "").strip()
+        category = (form.get("category") or "").strip() or None
+        note = (form.get("note") or "").strip() or None
+        month_key = spent_on.strftime("%Y-%m")
+
+        if existing is None:
+            flash("That expense is gone.", "error")
+            return redirect(url_for("index", tab="expenses", month=month_key))
+        if amount is None or amount <= 0 or not description:
+            flash("Enter an amount and a short description.", "error")
+            return redirect(
+                url_for("index", tab="expenses", month=existing.spent_on.strftime("%Y-%m"))
+            )
+
+        db.update_expense(
+            conn,
+            expense_id,
+            spent_on=spent_on,
+            amount=amount,
+            description=description,
+            category=category,
+            note=note,
+        )
+        flash(f"Updated {format_inr(amount)} — {description}.", "success")
+        return redirect(url_for("index", tab="expenses", month=month_key))
+
+    @app.post("/expenses/<int:expense_id>/delete")
+    def delete_expense(expense_id: int):
+        conn = db.connect()
+        db.init(conn)
+        existing = db.get_expense(conn, expense_id)
+        month_key = (
+            existing.spent_on.strftime("%Y-%m") if existing else date.today().strftime("%Y-%m")
+        )
+        if existing is None or not db.delete_expense(conn, expense_id):
+            flash("That expense is gone.", "error")
+        else:
+            flash(f"Removed {existing.description}.", "success")
+        return redirect(url_for("index", tab="expenses", month=month_key))
+
+    @app.post("/expenses/fetch")
+    def fetch_expenses():
+        """No-JS fallback for expense alert ingest."""
+        conn = db.connect()
+        db.init(conn)
+        if not gmail.is_connected():
+            flash("Connect Gmail first so expense alerts can be fetched.", "error")
+            return redirect(url_for("index", tab="expenses"))
+        try:
+            summary = expense_ingest.ingest_expense_alerts(conn, interactive=False)
+        except gmail.GmailNotConfigured as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("index", tab="expenses"))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Expense alert ingest failed")
+            flash(f"Could not fetch expense alerts: {exc}", "error")
+            return redirect(url_for("index", tab="expenses"))
+
+        flash(
+            f"Added {summary.added} expense(s) from Gmail"
+            + (f"; skipped {summary.skipped}." if summary.skipped else "."),
+            "success",
+        )
+        return redirect(url_for("index", tab="expenses"))
 
     return app

@@ -256,6 +256,9 @@ def _transaction(
     description = _clean(description)
     if amount is None or not _LETTERS.search(description) or _SUMMARY.match(description):
         return None
+    # Period lines like "13/06/2026 To 12/07/2026 …" leave a useless "To".
+    if re.fullmatch(r"(?i)to|from|dr|cr", description or ""):
+        return None
     if require_date and txn_date is None:
         return None
 
@@ -381,11 +384,24 @@ def dedupe(rows: list[Transaction]) -> list[Transaction]:
     return kept
 
 
+def _score(rows: list[Transaction]) -> tuple[int, float]:
+    """Prefer more line items, then a larger absolute spend sum."""
+    total = sum(abs(txn.amount) for txn in rows)
+    return (len(rows), total)
+
+
 def extract_transactions(
     text: str, tables: list[list[list[str | None]]] | None = None
 ) -> list[Transaction]:
-    """Every line item the statement gives up, tables first."""
+    """Every line item the statement gives up.
+
+    Tables and lines are both tried; the richer parse wins. Blindly preferring
+    a sparse pdfplumber table used to wipe out good line extracts.
+    """
     from_table = dedupe(from_tables(tables or []))
-    if len(from_table) > 1:
+    from_line = dedupe(from_lines(text))
+    if not from_table:
+        return from_line
+    if not from_line:
         return from_table
-    return dedupe(from_lines(text))
+    return from_table if _score(from_table) >= _score(from_line) else from_line

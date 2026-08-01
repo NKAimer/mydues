@@ -1,0 +1,6 @@
+SBI Card Statement
+XXXX XXXX XXXX XX18
+Statement Date: 24 Jul 2026
+Total Amount Due Minimum Amount Due Payment Due Date
+INR 4,512.00 INR 225.00 13 Aug 2026
+Credit Limit: INR 1,50,000.00

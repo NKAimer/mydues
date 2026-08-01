@@ -17,8 +17,19 @@ STATEMENT = ParsedStatement(
 )
 
 
-def test_store_registers_an_unknown_card(conn):
+def test_store_does_not_auto_create_cards_by_default(conn):
     status, detail, card_id = ingest.store(conn, STATEMENT, source_ref="msg-1")
+
+    assert status == ingest.STATUS_UNPARSED
+    assert card_id is None
+    assert db.list_cards(conn) == []
+    assert "add the card first" in detail
+
+
+def test_store_registers_an_unknown_card_when_opted_in(conn):
+    status, detail, card_id = ingest.store(
+        conn, STATEMENT, source_ref="msg-1", create_missing=True
+    )
 
     assert status == ingest.STATUS_PARSED
     assert card_id is not None
@@ -27,6 +38,18 @@ def test_store_registers_an_unknown_card(conn):
     assert cards[0].last4 == "8765"
     assert "HDFC Bank" in cards[0].label
     assert "45231.50" in detail
+
+
+def test_store_matches_an_existing_card(conn):
+    card = Card(issuer="hdfc", label="My Infinia", last4="8765")
+    card.id = db.add_card(conn, card)
+
+    _, _, card_id = ingest.store(conn, STATEMENT, source_ref="msg-1")
+
+    assert card_id == card.id
+    assert len(db.list_cards(conn)) == 1
+    view = dues.view_for_card(conn, card, today=date(2026, 7, 20))
+    assert view.billed_amount == pytest.approx(45231.50)
 
 
 def test_store_matches_sbi_partial_tail_to_registered_card(conn):
@@ -68,6 +91,7 @@ def test_store_does_not_guess_when_partial_tail_matches_two_cards(conn):
 
 
 def test_reingesting_the_same_statement_does_not_duplicate(conn):
+    db.add_card(conn, Card(issuer="hdfc", label="My Infinia", last4="8765"))
     ingest.store(conn, STATEMENT, source_ref="msg-1")
     ingest.store(conn, STATEMENT, source_ref="msg-1")
 
@@ -76,6 +100,7 @@ def test_reingesting_the_same_statement_does_not_duplicate(conn):
 
 
 def test_store_replaces_prior_cycle_when_statement_date_changes(conn):
+    db.add_card(conn, Card(issuer="hdfc", label="My Infinia", last4="8765"))
     ingest.store(conn, STATEMENT, source_ref="msg-1")
     corrected = ParsedStatement(
         total_due=45231.50,

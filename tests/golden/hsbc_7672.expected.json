@@ -1,0 +1,9 @@
+{
+  "issuer": "hsbc",
+  "last4": "7672",
+  "total_due": 20252.96,
+  "min_due": 202.53,
+  "due_date": "2026-08-06",
+  "statement_date": "2026-07-22",
+  "min_transactions": 5
+}

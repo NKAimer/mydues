@@ -13,7 +13,8 @@ from typing import Iterable
 from dateutil import parser as dateparser
 
 _AMOUNT_CORE = r"\d{1,3}(?:,\d{2,3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?"
-_CURRENCY = r"(?:INR|Rs\.?|₹|`)"
+_CURRENCY = r"(?:INR|Rs\.?|₹|`|C(?=\d))"
+
 
 AMOUNT_RE = re.compile(
     rf"(?P<sign>-)?\s*{_CURRENCY}?\s*(?P<num>{_AMOUNT_CORE})\s*(?P<suffix>Cr|Dr|CR|DR)?\b",

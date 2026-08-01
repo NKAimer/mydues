@@ -77,6 +77,92 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_audit(args) -> int:
+    """Report weak parses across every registered card."""
+    from . import audit
+
+    conn = db.connect()
+    db.init(conn)
+    findings = audit.audit_cards(conn)
+    if not findings:
+        console.print("[green]All cards look complete.[/green]")
+        return 0
+    table = Table(title="Parse quality")
+    table.add_column("Card")
+    table.add_column("Issue")
+    table.add_column("Detail")
+    for finding in findings:
+        table.add_row(finding.card_label, finding.kind, finding.detail)
+    console.print(table)
+    console.print(f"[yellow]{len(findings)} finding(s)[/yellow]")
+    return 1
+
+
+def cmd_dump_golden(args) -> int:
+    """Write text + expected stubs from the latest statement per registered card."""
+    from . import passwords, pdfdoc
+    from .parsers import parse_statement
+    from .text import normalize
+
+    conn = db.connect()
+    db.init(conn)
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    cards = db.list_cards(conn)
+    if not cards:
+        console.print("No cards registered.")
+        return 1
+
+    written = 0
+    for card in cards:
+        records = db.statements_for_card(conn, card.id)
+        record = dues.latest_record(records)
+        if record is None or not record.source_ref:
+            continue
+        rows = conn.execute(
+            "SELECT filename FROM ingest_log WHERE message_id = ? AND status = 'parsed' "
+            "ORDER BY id DESC LIMIT 1",
+            (record.source_ref,),
+        ).fetchall()
+        if not rows:
+            continue
+        filename = rows[0]["filename"]
+        path = gmail.attachment_path(record.source_ref, filename)
+        if not path.exists():
+            console.print(f"[dim]Skip {card.label}: {path.name} not on disk[/dim]")
+            continue
+        candidates = passwords.candidates_for_all(cards)
+        try:
+            extracted = pdfdoc.extract(path, candidates)
+        except Exception as exc:  # noqa: BLE001
+            console.print(f"[yellow]{card.label}: {exc}[/yellow]")
+            continue
+        text = normalize(extracted.text)
+        parsed = parse_statement(text, issuer_hint=card.issuer, tables=extracted.tables)
+        slug = f"{card.issuer}_{card.last4}"
+        text_path = out / f"{slug}.txt"
+        expect_path = out / f"{slug}.expected.json"
+        text_path.write_text(text, encoding="utf-8")
+        expected = {
+            "issuer": card.issuer,
+            "last4": card.last4,
+            "total_due": parsed.total_due if parsed else None,
+            "min_due": parsed.min_due if parsed else None,
+            "due_date": parsed.due_date.isoformat() if parsed and parsed.due_date else None,
+            "statement_date": (
+                parsed.statement_date.isoformat()
+                if parsed and parsed.statement_date
+                else None
+            ),
+            "min_transactions": len(parsed.transactions) if parsed else 0,
+        }
+        expect_path.write_text(json.dumps(expected, indent=2) + "\n", encoding="utf-8")
+        console.print(f"Wrote {text_path.name} + {expect_path.name}")
+        written += 1
+    console.print(f"Wrote {written} golden pair(s) under {out}")
+    return 0 if written else 1
+
+
 def cmd_auth(args) -> int:
     if gmail.client_type() == "web":
         console.print(
@@ -256,8 +342,11 @@ def cmd_reparse(args) -> int:
     )
     for result in summary.needs_attention:
         console.print(f"  [yellow]{result.status}[/yellow] {result.filename}: {result.detail}")
-    if summary.remaining:
-        console.print(f"[dim]{summary.remaining} still to re-read; run it again to continue.[/dim]")
+    if summary.remaining and args.limit is not None:
+        console.print(
+            f"[dim]{summary.remaining} still to re-read; "
+            "raise --limit or omit it to cover the rest.[/dim]"
+        )
     return 0
 
 
@@ -495,6 +584,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init", help="create the local database").set_defaults(func=cmd_init)
     sub.add_parser("auth", help="connect Gmail (read-only)").set_defaults(func=cmd_auth)
 
+    audit_cmd = sub.add_parser(
+        "audit", help="check every card for missing dues or transactions"
+    )
+    audit_cmd.set_defaults(func=cmd_audit)
+
+    dump_golden = sub.add_parser(
+        "dump-golden",
+        help="write statement text dumps + expected stubs for golden tests",
+    )
+    dump_golden.add_argument(
+        "--out",
+        default=str(Path("tests/golden")),
+        help="directory for .txt / .expected.json pairs",
+    )
+    dump_golden.set_defaults(func=cmd_dump_golden)
+
     cards = sub.add_parser("cards", help="manage cards").add_subparsers(
         dest="cards_command", required=True
     )
@@ -543,7 +648,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     reparse.add_argument("--issuer", choices=sorted(issuers.ISSUERS))
     reparse.add_argument(
-        "--limit", type=int, default=ingest.REPROCESS_BATCH, help="attachments per pass"
+        "--limit",
+        type=int,
+        default=None,
+        help="max attachments this pass (default: all)",
     )
     reparse.set_defaults(func=cmd_reparse)
 

@@ -164,6 +164,67 @@ def test_fetch_still_skips_parsed_attachments(conn, card, monkeypatch):
     assert summary.results == []
 
 
+def test_reparse_without_limit_covers_more_than_a_batch(conn, monkeypatch):
+    """Dashboard/default reparse must not stop after the old batch of 40."""
+    batch = ingest.REPROCESS_BATCH
+    total = batch + 5
+    for index in range(total):
+        db.log_ingest(
+            conn,
+            message_id=f"msg-{index}",
+            filename=f"stmt-{index}.pdf",
+            status=ingest.STATUS_PARSED,
+            detail="ok",
+            issuer="icici",
+            received_at=datetime(2026, 1, 1, 12, index % 60),
+        )
+
+    seen: list[str] = []
+
+    def fake_local_copy(message_id, filename, **_kwargs):
+        seen.append(filename)
+        raise ingest.AttachmentGone(filename)
+
+    monkeypatch.setattr(ingest.gmail, "service", lambda **_: object())
+    monkeypatch.setattr(ingest, "_local_copy", fake_local_copy)
+
+    summary = ingest.reparse_parsed(conn)
+
+    assert len(summary.results) == total
+    assert len(seen) == total
+    assert summary.remaining == 0
+
+
+def test_reparse_limit_still_batches(conn, monkeypatch):
+    for index in range(5):
+        db.log_ingest(
+            conn,
+            message_id=f"msg-{index}",
+            filename=f"stmt-{index}.pdf",
+            status=ingest.STATUS_PARSED,
+            detail="ok",
+            issuer="hdfc",
+            received_at=datetime(2026, 2, 1, 12, index),
+        )
+
+    seen: list[str] = []
+
+    def fake_local_copy(message_id, filename, **_kwargs):
+        seen.append(filename)
+        raise ingest.AttachmentGone(filename)
+
+    monkeypatch.setattr(ingest.gmail, "service", lambda **_: object())
+    monkeypatch.setattr(ingest, "_local_copy", fake_local_copy)
+
+    summary = ingest.reparse_parsed(conn, limit=2)
+
+    assert len(summary.results) == 2
+    assert len(seen) == 2
+    assert summary.remaining == 3
+    # Newest first: minutes 4 and 3.
+    assert seen == ["stmt-4.pdf", "stmt-3.pdf"]
+
+
 def test_dashboard_offers_reparse_when_gmail_is_connected(client, conn, monkeypatch):
     monkeypatch.setattr(gmail, "is_connected", lambda: True)
 

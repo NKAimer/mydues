@@ -37,11 +37,39 @@ class HdfcParser(StatementParser):
     key = "hdfc"
     issuer_key = "hdfc"
     labels = _labels(
-        total_due=("Total Dues", "Total Amount Due"),
-        min_due=("Minimum Amount Due",),
-        due_date=("Payment Due Date",),
+        total_due=("Total Amount Due", "Total Dues"),
+        min_due=("Minimum Amount Due", "Minimum Due"),
+        due_date=("Payment Due Date", "Due Date"),
         statement_date=("Statement Date",),
     )
+
+    # Tata Neu / Swiggy print a fused header, then min due + due date on the next line:
+    #   MINIMUM DUE DUE DATE
+    #   C220.00 21 Jul, 2026
+    _MIN_DUE_DUE_DATE = re.compile(
+        r"(?i)MINIMUM\s+DUE\s+DUE\s+DATE\s*\n\s*"
+        r"(C?\s*[\d,]+\.\d{2})\s+"
+        r"(\d{1,2}\s+[A-Za-z]{3},?\s+\d{2,4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})"
+    )
+
+    def postprocess(self, statement: ParsedStatement, text: str) -> ParsedStatement:
+        from ..text import parse_date
+
+        match = self._MIN_DUE_DUE_DATE.search(text or "")
+        if not match:
+            return statement
+        amount = parse_amount(match.group(1))
+        due = parse_date(match.group(2))
+        if amount is not None and (statement.min_due is None or statement.min_due == 0):
+            statement.min_due = amount
+            statement.matched_labels["min_due"] = "Minimum Due"
+        if due is not None and statement.due_date is None:
+            statement.due_date = due
+            statement.matched_labels["due_date"] = "Due Date"
+        elif due is not None and statement.statement_date and due >= statement.statement_date:
+            statement.due_date = due
+            statement.matched_labels["due_date"] = "Due Date"
+        return statement
 
 
 class IciciParser(StatementParser):

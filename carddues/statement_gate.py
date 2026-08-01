@@ -38,7 +38,7 @@ _SOFT_TITLE_WINDOW = 900
 # Filenames that arrive with statement mail but are not the bill itself.
 _NON_STATEMENT_FILE_RE = re.compile(
     r"(?i)(?:most\s+important\s+terms|terms\s*(?:&|and)\s*conditions|key\s+fact|"
-    r"mitc|schedule\s+of\s+charges)"
+    r"mitc|schedule\s+of\s+charges|card\s+agreement|customer\s+agreement)"
 )
 
 # At least one of these appears on every issuer layout we support.

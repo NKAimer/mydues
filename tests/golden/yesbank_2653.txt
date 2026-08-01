@@ -1,0 +1,22 @@
+Credit Card Statement
+YES BANK KLICK
+Statement for YES BANK Card Number 3561XXXXXXXX2653
+Previous Balance :
+Rs. 6,062.00 Dr
+Statement Period: Credit Limit:
+13/06/2026 To 12/07/2026 Rs. 4,00,000.00 Current Purchases / Cash Advance
+Available Credit Limit: & Other Charges :
+Statement Date : 12/07/2026 Rs. 3,87,745.00 Rs. 16,455.00 Dr
+Total Amount Due: Cash Limit: Points Earned : 0
+Rs. 12,255.00 Rs. 0.00
+Payment & Credits Received :
+Minimum Amount Due: Available Cash Limit: Rs. 10,262.00 Cr
+Rs. 245.10 Rs. 0.00
+Payment Due Date: 01/08/2026 YES ONLINE Other Mode
+
+Transaction Details
+13/06/2026 UPI_SWIGGY BANGALORE Ref No: RT123 420.00
+14/06/2026 AMAZON PAY INDIA 1,250.00
+20/06/2026 ZOMATO ONLINE 380.50
+01/07/2026 PAYMENT RECEIVED THANK YOU 6,062.00 Cr
+05/07/2026 FLIPKART INTERNET 890.00

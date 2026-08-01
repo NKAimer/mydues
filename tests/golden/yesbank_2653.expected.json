@@ -1,0 +1,9 @@
+{
+  "issuer": "yesbank",
+  "last4": "2653",
+  "total_due": 12255.0,
+  "min_due": 245.1,
+  "due_date": "2026-08-01",
+  "statement_date": "2026-07-12",
+  "min_transactions": 5
+}

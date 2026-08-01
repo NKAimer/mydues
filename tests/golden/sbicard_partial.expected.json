@@ -1,0 +1,9 @@
+{
+  "issuer": "sbicard",
+  "last4": null,
+  "total_due": 4512.0,
+  "min_due": 225.0,
+  "due_date": "2026-08-13",
+  "statement_date": "2026-07-24",
+  "min_transactions": 0
+}

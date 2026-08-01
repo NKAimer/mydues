@@ -53,6 +53,17 @@ class DueView:
         return round(sum(txn.signed_amount for txn in self.transactions), 2)
 
     @property
+    def transactions_missing(self) -> bool:
+        """True when the bill looks active but no line items were stored."""
+        from .parse_quality import transactions_missing_for_record
+
+        if self.record is None:
+            return False
+        return transactions_missing_for_record(
+            total_due=self.record.total_due, txn_count=len(self.transactions)
+        )
+
+    @property
     def is_latest(self) -> bool:
         """False while an older cycle is being looked at."""
         newest = latest_record(self.history)
@@ -172,8 +183,16 @@ class DueView:
 
 
 def _rank(record: StatementRecord) -> tuple:
+    # Undated junk (agreements / T&Cs mis-parsed) must not beat a real cycle
+    # just because it was ingested later.
+    has_cycle_date = 1 if record.statement_date is not None else 0
     anchor = record.statement_date or (record.as_of.date() if record.as_of else date.min)
-    return (anchor, SOURCE_PRIORITY.get(record.source, 0), record.as_of or datetime.min)
+    return (
+        has_cycle_date,
+        anchor,
+        SOURCE_PRIORITY.get(record.source, 0),
+        record.as_of or datetime.min,
+    )
 
 
 def latest_record(records: list[StatementRecord]) -> StatementRecord | None:

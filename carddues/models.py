@@ -15,6 +15,7 @@ from datetime import date, datetime
 SOURCE_MANUAL = "manual"
 SOURCE_BBPS = "bbps"
 SOURCE_STATEMENT = "statement"
+SOURCE_GMAIL = "gmail"
 
 SOURCE_PRIORITY = {SOURCE_MANUAL: 2, SOURCE_BBPS: 1, SOURCE_STATEMENT: 0}
 
@@ -84,8 +85,9 @@ class ParsedStatement:
     @property
     def confidence(self) -> float:
         """Share of the fields a complete statement should yield."""
-        fields = [self.total_due, self.min_due, self.due_date, self.statement_date]
-        return sum(1 for value in fields if value is not None) / len(fields)
+        from .parse_quality import confidence as quality_confidence
+
+        return quality_confidence(self)
 
 
 @dataclass
@@ -106,3 +108,18 @@ class StatementRecord:
     parser: str | None = None
     confidence: float | None = None
     note: str | None = None
+
+
+@dataclass
+class Expense:
+    """One spend entry in the expenses ledger (separate from card dues)."""
+
+    spent_on: date
+    amount: float
+    description: str
+    source: str = SOURCE_MANUAL
+    id: int | None = None
+    category: str | None = None
+    source_ref: str | None = None
+    note: str | None = None
+    created_at: datetime | None = None

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from . import config, db, gmail, issuers, passwords, pdfdoc
+from . import config, db, gmail, issuers, passwords, pdfdoc, parse_quality
 from .models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
 from .parsers import parse_statement
 from .statement_gate import is_credit_card_mail, looks_like_credit_card_statement
@@ -25,6 +26,29 @@ STATUS_ERROR = "error"
 # is no longer on disk costs a Gmail round trip, so a pass stays bounded and
 # reports what is left.
 REPROCESS_BATCH = 40
+
+ProgressCallback = Callable[["ProgressEvent"], None]
+
+
+@dataclass(frozen=True)
+class ProgressEvent:
+    """One update for a long ingest/reparse pass (dashboard progress UI)."""
+
+    index: int
+    total: int
+    filename: str = ""
+    status: str | None = None
+    detail: str | None = None
+    phase: str = "parse"  # fetch | parse | done
+
+
+def _emit(on_progress: ProgressCallback | None, event: ProgressEvent) -> None:
+    if on_progress is None:
+        return
+    try:
+        on_progress(event)
+    except Exception:  # noqa: BLE001 - UI callback must not abort the batch
+        logger.exception("Progress callback failed")
 
 
 @dataclass
@@ -85,8 +109,9 @@ def _resolve_card(
     if not create_missing:
         return None
 
-    # Auto-create only when the bill looks complete enough to trust last4.
-    if statement.due_date is None and statement.min_due is None:
+    # Opt-in auto-create only when the bill looks complete enough to trust last4.
+    quality = parse_quality.assess(statement)
+    if not quality.hard_ok or not statement.last4:
         return None
 
     issuer_key = statement.issuer or "other"
@@ -102,8 +127,17 @@ def store(
     statement: ParsedStatement,
     *,
     source_ref: str | None,
-    create_missing: bool = True,
+    create_missing: bool = False,
+    previous: StatementRecord | None = None,
+    previous_txn_count: int = 0,
 ) -> tuple[str, str, int | None]:
+    if previous is not None:
+        reason = parse_quality.reparse_regression(
+            previous, previous_txn_count=previous_txn_count, new=statement
+        )
+        if reason:
+            return STATUS_ERROR, f"Reparse refused: {reason}", previous.card_id
+
     card = _resolve_card(conn, statement, create_missing=create_missing)
     if card is None:
         return (
@@ -111,6 +145,11 @@ def store(
             "Could not tell which card this statement belongs to; add the card first",
             None,
         )
+
+    quality = parse_quality.assess(statement)
+    note = None
+    if quality.transactions_incomplete:
+        note = "Transactions not read"
 
     record = StatementRecord(
         card_id=card.id,
@@ -124,6 +163,7 @@ def store(
         source_ref=source_ref,
         parser=statement.parser,
         confidence=statement.confidence,
+        note=note,
         as_of=datetime.now(),
     )
     statement_id = db.save_statement(conn, record)
@@ -132,6 +172,8 @@ def store(
     detail = f"{card.label}: total due {statement.total_due:.2f}"
     if statement.transactions:
         detail += f", {len(statement.transactions)} transaction(s)"
+    elif quality.transactions_incomplete:
+        detail += " (transactions not read)"
     return STATUS_PARSED, detail, card.id
 
 
@@ -156,11 +198,15 @@ def ingest_pdf(
     source_ref: str | None = None,
     extra_passwords: list[str] | None = None,
     password_hint: str | None = None,
+    create_missing: bool = False,
+    previous: StatementRecord | None = None,
+    previous_txn_count: int = 0,
 ) -> IngestResult:
     """Parse one statement PDF and store what it yields.
 
     `password_hint` is the covering email's text. Issuers state their password
     rule there, so a password derived from it is tried before any guesswork.
+    Auto-create is off by default — register cards explicitly.
     """
     path = Path(path)
     cards = db.list_cards(conn)
@@ -199,7 +245,14 @@ def ingest_pdf(
             source_ref,
         )
 
-    status, detail, card_id = store(conn, statement, source_ref=source_ref)
+    status, detail, card_id = store(
+        conn,
+        statement,
+        source_ref=source_ref,
+        create_missing=create_missing,
+        previous=previous,
+        previous_txn_count=previous_txn_count,
+    )
     return IngestResult(status, detail, path.name, source_ref, statement, card_id)
 
 
@@ -345,6 +398,7 @@ def reprocess_pending(
     issuer: str | None = None,
     limit: int = REPROCESS_BATCH,
     interactive: bool = False,
+    on_progress: ProgressCallback | None = None,
 ) -> IngestSummary:
     """Try the waiting attachments again with every card now on file.
 
@@ -355,13 +409,21 @@ def reprocess_pending(
     """
     summary = IngestSummary()
     service_for = _lazy_service(interactive)
+    rows = [
+        row
+        for row in db.pending_ingest(conn, issuer=issuer, limit=limit)
+        if row["message_id"] and row["filename"]
+    ]
+    total = len(rows)
+    _emit(on_progress, ProgressEvent(index=0, total=total, filename="", phase="fetch"))
 
-    for row in db.pending_ingest(conn, issuer=issuer, limit=limit):
+    for index, row in enumerate(rows, start=1):
         message_id = row["message_id"]
         filename = row["filename"]
-        # A local import has no mail to go back to; `carddues import` re-runs it.
-        if not (message_id and filename):
-            continue
+        _emit(
+            on_progress,
+            ProgressEvent(index=index, total=total, filename=filename, phase="parse"),
+        )
 
         try:
             path, message = _local_copy(
@@ -372,18 +434,52 @@ def reprocess_pending(
             )
         except gmail.GmailNotConfigured as exc:
             # Nothing else in this batch can be fetched either.
-            summary.results.append(IngestResult(STATUS_ERROR, str(exc), filename, message_id))
+            result = IngestResult(STATUS_ERROR, str(exc), filename, message_id)
+            summary.results.append(result)
+            _emit(
+                on_progress,
+                ProgressEvent(
+                    index=index,
+                    total=total,
+                    filename=filename,
+                    status=result.status,
+                    detail=result.detail,
+                    phase="done",
+                ),
+            )
             break
         except AttachmentGone as exc:
             result = IngestResult(STATUS_ERROR, str(exc), filename, message_id)
             summary.results.append(result)
             _log(conn, message_id=message_id, filename=filename, result=result, message=None)
+            _emit(
+                on_progress,
+                ProgressEvent(
+                    index=index,
+                    total=total,
+                    filename=filename,
+                    status=result.status,
+                    detail=result.detail,
+                    phase="done",
+                ),
+            )
             continue
         except Exception as exc:  # noqa: BLE001 - one bad mail must not stop the pass
             logger.exception("Could not re-download %s", filename)
             result = IngestResult(STATUS_ERROR, f"Re-download failed: {exc}", filename, message_id)
             summary.results.append(result)
             _log(conn, message_id=message_id, filename=filename, result=result, message=None)
+            _emit(
+                on_progress,
+                ProgressEvent(
+                    index=index,
+                    total=total,
+                    filename=filename,
+                    status=result.status,
+                    detail=result.detail,
+                    phase="done",
+                ),
+            )
             continue
 
         result = ingest_pdf(
@@ -397,6 +493,17 @@ def reprocess_pending(
         result.message_id = message_id
         summary.results.append(result)
         _log(conn, message_id=message_id, filename=filename, result=result, message=message)
+        _emit(
+            on_progress,
+            ProgressEvent(
+                index=index,
+                total=total,
+                filename=filename,
+                status=result.status,
+                detail=result.detail,
+                phase="done",
+            ),
+        )
 
         # Keep a locked file so that a typed password can retry it at once.
         if result.status != STATUS_LOCKED:
@@ -436,25 +543,36 @@ def reparse_parsed(
     conn: sqlite3.Connection,
     *,
     issuer: str | None = None,
-    limit: int = REPROCESS_BATCH,
+    limit: int | None = None,
     interactive: bool = False,
+    on_progress: ProgressCallback | None = None,
 ) -> IngestSummary:
     """Re-read already-parsed attachments with the current parsers.
 
     Fetch skips anything marked parsed, so a bug fix in date extraction does
-    not rewrite stored cycles until this runs.
+    not rewrite stored cycles until this runs. By default every parsed
+    attachment is re-read; pass ``limit`` to cap a single pass.
     """
     summary = IngestSummary()
     service_for = _lazy_service(interactive)
     # Snapshot before the pass: successes stay `parsed`, so a post-loop count
     # would still include everything we just rewrote.
     total_before = db.count_parsed_ingest(conn, issuer=issuer)
+    rows = [
+        row
+        for row in db.parsed_ingest(conn, issuer=issuer, limit=limit)
+        if row["message_id"] and row["filename"]
+    ]
+    total = len(rows)
+    _emit(on_progress, ProgressEvent(index=0, total=total, filename="", phase="fetch"))
 
-    for row in db.parsed_ingest(conn, issuer=issuer, limit=limit):
+    for index, row in enumerate(rows, start=1):
         message_id = row["message_id"]
         filename = row["filename"]
-        if not (message_id and filename):
-            continue
+        _emit(
+            on_progress,
+            ProgressEvent(index=index, total=total, filename=filename, phase="parse"),
+        )
 
         try:
             path, message = _local_copy(
@@ -464,13 +582,36 @@ def reparse_parsed(
                 need_message=True,
             )
         except gmail.GmailNotConfigured as exc:
-            summary.results.append(IngestResult(STATUS_ERROR, str(exc), filename, message_id))
+            result = IngestResult(STATUS_ERROR, str(exc), filename, message_id)
+            summary.results.append(result)
+            _emit(
+                on_progress,
+                ProgressEvent(
+                    index=index,
+                    total=total,
+                    filename=filename,
+                    status=result.status,
+                    detail=result.detail,
+                    phase="done",
+                ),
+            )
             break
         except AttachmentGone as exc:
             result = IngestResult(STATUS_ERROR, str(exc), filename, message_id)
             summary.results.append(result)
             _log_reparse(
                 conn, message_id=message_id, filename=filename, result=result, message=None
+            )
+            _emit(
+                on_progress,
+                ProgressEvent(
+                    index=index,
+                    total=total,
+                    filename=filename,
+                    status=result.status,
+                    detail=result.detail,
+                    phase="done",
+                ),
             )
             continue
         except Exception as exc:  # noqa: BLE001 - one bad mail must not stop the pass
@@ -480,7 +621,26 @@ def reparse_parsed(
             _log_reparse(
                 conn, message_id=message_id, filename=filename, result=result, message=None
             )
+            _emit(
+                on_progress,
+                ProgressEvent(
+                    index=index,
+                    total=total,
+                    filename=filename,
+                    status=result.status,
+                    detail=result.detail,
+                    phase="done",
+                ),
+            )
             continue
+
+        priors = db.statements_for_source_ref(conn, message_id) if message_id else []
+        previous = priors[0] if priors else None
+        previous_txn_count = (
+            db.transaction_count_for_statement(conn, previous.id)
+            if previous and previous.id
+            else 0
+        )
 
         result = ingest_pdf(
             conn,
@@ -488,12 +648,25 @@ def reparse_parsed(
             issuer_hint=message.issuer_key if message else row["issuer"],
             source_ref=message_id,
             password_hint=message.body if message else None,
+            previous=previous,
+            previous_txn_count=previous_txn_count,
         )
         result.filename = filename
         result.message_id = message_id
         summary.results.append(result)
         _log_reparse(
             conn, message_id=message_id, filename=filename, result=result, message=message
+        )
+        _emit(
+            on_progress,
+            ProgressEvent(
+                index=index,
+                total=total,
+                filename=filename,
+                status=result.status,
+                detail=result.detail,
+                phase="done",
+            ),
         )
 
         # Parsed PDFs are not kept between runs; locked ones stay for unlock.
@@ -512,6 +685,7 @@ def ingest_gmail(
     interactive: bool = True,
     keep_files: bool = False,
     query: str | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> IngestSummary:
     """Search Gmail for statement mails and ingest every PDF attachment."""
     summary = IngestSummary()
@@ -522,6 +696,11 @@ def ingest_gmail(
     message_ids = gmail.search(service, search_query, max_results=limit)
     already_seen = db.seen_attachments(conn)
 
+    work: list[tuple[gmail.Message, gmail.Attachment]] = []
+    _emit(
+        on_progress,
+        ProgressEvent(index=0, total=0, filename="", phase="fetch"),
+    )
     for message_id in message_ids:
         message = gmail.get_message(service, message_id)
         if not is_credit_card_mail(subject=message.subject):
@@ -537,45 +716,79 @@ def ingest_gmail(
                     message.subject,
                 )
                 continue
+            work.append((message, attachment))
 
-            try:
-                path = gmail.download(service, attachment)
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("Download failed for %s", attachment.filename)
-                result = IngestResult(
-                    STATUS_ERROR, f"Download failed: {exc}", attachment.filename, message_id
-                )
-                summary.results.append(result)
-                _log(
-                    conn,
-                    message_id=message_id,
-                    filename=attachment.filename,
-                    result=result,
-                    message=message,
-                )
-                continue
+    total = len(work)
+    _emit(on_progress, ProgressEvent(index=0, total=total, filename="", phase="fetch"))
 
-            result = ingest_pdf(
-                conn,
-                path,
-                issuer_hint=message.issuer_key,
-                source_ref=message_id,
-                password_hint=message.body,
+    for index, (message, attachment) in enumerate(work, start=1):
+        message_id = attachment.message_id
+        filename = attachment.filename
+        _emit(
+            on_progress,
+            ProgressEvent(index=index, total=total, filename=filename, phase="parse"),
+        )
+
+        try:
+            path = gmail.download(service, attachment)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Download failed for %s", filename)
+            result = IngestResult(
+                STATUS_ERROR, f"Download failed: {exc}", filename, message_id
             )
-            result.message_id = message_id
             summary.results.append(result)
             _log(
                 conn,
                 message_id=message_id,
-                filename=attachment.filename,
+                filename=filename,
                 result=result,
                 message=message,
             )
+            _emit(
+                on_progress,
+                ProgressEvent(
+                    index=index,
+                    total=total,
+                    filename=filename,
+                    status=result.status,
+                    detail=result.detail,
+                    phase="done",
+                ),
+            )
+            continue
 
-            # A locked file is kept so that supplying its password can retry
-            # immediately instead of waiting for the next fetch.
-            if not keep_files and result.status != STATUS_LOCKED:
-                path.unlink(missing_ok=True)
+        result = ingest_pdf(
+            conn,
+            path,
+            issuer_hint=message.issuer_key,
+            source_ref=message_id,
+            password_hint=message.body,
+        )
+        result.message_id = message_id
+        summary.results.append(result)
+        _log(
+            conn,
+            message_id=message_id,
+            filename=filename,
+            result=result,
+            message=message,
+        )
+        _emit(
+            on_progress,
+            ProgressEvent(
+                index=index,
+                total=total,
+                filename=filename,
+                status=result.status,
+                detail=result.detail,
+                phase="done",
+            ),
+        )
+
+        # A locked file is kept so that supplying its password can retry
+        # immediately instead of waiting for the next fetch.
+        if not keep_files and result.status != STATUS_LOCKED:
+            path.unlink(missing_ok=True)
 
     summary.remaining = db.count_pending_ingest(conn)
     return summary

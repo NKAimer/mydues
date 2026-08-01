@@ -1,0 +1,9 @@
+{
+  "issuer": "hdfc",
+  "last4": "8765",
+  "total_due": 45231.5,
+  "min_due": 2270.0,
+  "due_date": "2026-07-25",
+  "statement_date": "2026-07-05",
+  "min_transactions": 1
+}

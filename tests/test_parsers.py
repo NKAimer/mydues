@@ -94,7 +94,19 @@ def test_hdfc_tata_neu_live_layout_never_registers_0722():
     assert result is not None
     assert result.last4 == "2750"
     assert result.total_due == pytest.approx(4373.0)
+    assert result.min_due == pytest.approx(220.0)
+    assert result.due_date == date(2026, 7, 21)
     assert "0722" not in (result.last4 or "")
+
+
+def test_hdfc_swiggy_reads_fused_minimum_due_due_date_row():
+    result = parse(fixtures.HDFC_SWIGGY_LIVE_LAYOUT, issuer_hint="hdfc")
+
+    assert result is not None
+    assert result.last4 == "6527"
+    assert result.total_due == pytest.approx(2447.0)
+    assert result.min_due == pytest.approx(200.0)
+    assert result.due_date == date(2026, 8, 9)
 
 
 def test_yesbank_reads_amounts_from_the_line_below_labels():
@@ -259,7 +271,10 @@ def test_issuer_hint_is_used():
 
 def test_confidence_reflects_completeness():
     full = parse(fixtures.ICICI_INLINE)
-    assert full.confidence == 1.0
+    # Summary fields + last4 present; no line items on this fixture.
+    assert full.confidence == pytest.approx(5 / 6)
+    with_txns = parse("\n".join(fixtures.STATEMENT_WITH_TRANSACTIONS))
+    assert with_txns.confidence == 1.0
 
 
 def test_doubled_header_glyphs_are_collapsed():

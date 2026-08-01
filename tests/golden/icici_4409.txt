@@ -1,0 +1,9 @@
+ICICI Bank Credit Card Statement
+
+Card Number: 5241 XXXX XXXX 4409
+Statement Date : 18-07-2026
+Payment Due Date : 05-08-2026
+Total Amount due : Rs. 1,12,480.35
+Minimum Amount due : Rs. 5,624.00
+Credit Limit : Rs. 8,00,000.00
+Available Credit Limit : Rs. 6,87,519.65

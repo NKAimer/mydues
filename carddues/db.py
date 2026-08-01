@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Iterable
 
 from . import config
-from .models import Card, StatementRecord, Transaction
+from .models import Card, Expense, StatementRecord, Transaction
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
@@ -83,6 +83,23 @@ CREATE TABLE IF NOT EXISTS ingest_log (
     created_at TEXT NOT NULL,
     UNIQUE (message_id, filename)
 );
+
+CREATE TABLE IF NOT EXISTS expenses (
+    id INTEGER PRIMARY KEY,
+    spent_on TEXT NOT NULL,
+    amount REAL NOT NULL,
+    description TEXT NOT NULL,
+    category TEXT,
+    source TEXT NOT NULL,
+    source_ref TEXT,
+    note TEXT,
+    created_at TEXT NOT NULL
+);
+
+-- Deduplicate keyed imports (Gmail message ids); manuals leave source_ref null.
+CREATE UNIQUE INDEX IF NOT EXISTS expenses_source_ref
+    ON expenses (source, source_ref)
+    WHERE source_ref IS NOT NULL;
 """
 
 # Columns added after the first release. SQLite cannot express these with
@@ -101,9 +118,13 @@ ADDED_COLUMNS = {
 def connect(path: Path | None = None) -> sqlite3.Connection:
     config.ensure_dirs()
     target = path or config.db_path()
-    conn = sqlite3.connect(target)
+    # timeout + WAL: dashboard reloads during SSE ingest must not crash with
+    # "database is locked" when another thread is writing.
+    conn = sqlite3.connect(target, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -122,8 +143,37 @@ def init(conn: sqlite3.Connection) -> None:
     purge_false_card(conn, issuer="hdfc", last4="1189")
     # ICICI savings e-statement was once auto-registered as ICICI ••0001.
     purge_false_card(conn, issuer="icici", last4="0001")
-    # Drop fixture/test rows that once shadowed a live Axis cycle.
-    conn.execute("DELETE FROM statements WHERE source_ref = 'test'")
+    # One-shot cleanups: only write when something still matches, so a page
+    # reload during SSE ingest does not fight for a write lock every time.
+    if conn.execute(
+        "SELECT 1 FROM statements WHERE source_ref = 'test' LIMIT 1"
+    ).fetchone():
+        conn.execute("DELETE FROM statements WHERE source_ref = 'test'")
+    junk = conn.execute(
+        """
+        SELECT 1 FROM statements
+        WHERE statement_date IS NULL AND due_date IS NULL
+          AND ABS(total_due) <= 500
+        LIMIT 1
+        """
+    ).fetchone()
+    if junk:
+        conn.execute(
+            """
+            DELETE FROM transactions WHERE statement_id IN (
+                SELECT id FROM statements
+                WHERE statement_date IS NULL AND due_date IS NULL
+                  AND ABS(total_due) <= 500
+            )
+            """
+        )
+        conn.execute(
+            """
+            DELETE FROM statements
+            WHERE statement_date IS NULL AND due_date IS NULL
+              AND ABS(total_due) <= 500
+            """
+        )
     conn.commit()
 
 
@@ -393,6 +443,24 @@ def _row_to_statement(row: sqlite3.Row) -> StatementRecord:
     )
 
 
+def statements_for_source_ref(
+    conn: sqlite3.Connection, source_ref: str
+) -> list[StatementRecord]:
+    rows = conn.execute(
+        "SELECT * FROM statements WHERE source_ref = ? ORDER BY id DESC",
+        (source_ref,),
+    ).fetchall()
+    return [_row_to_statement(row) for row in rows]
+
+
+def transaction_count_for_statement(conn: sqlite3.Connection, statement_id: int) -> int:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM transactions WHERE statement_id = ?",
+        (statement_id,),
+    ).fetchone()
+    return int(row["n"] if row else 0)
+
+
 def statements_for_card(conn: sqlite3.Connection, card_id: int) -> list[StatementRecord]:
     rows = conn.execute(
         "SELECT * FROM statements WHERE card_id = ? ORDER BY IFNULL(statement_date, as_of) DESC",
@@ -470,6 +538,119 @@ def add_payment(
     )
     conn.commit()
     return int(cursor.lastrowid or 0)
+
+
+def _expense_from_row(row: sqlite3.Row) -> Expense:
+    return Expense(
+        id=row["id"],
+        spent_on=_as_date(row["spent_on"]) or date.today(),
+        amount=float(row["amount"]),
+        description=row["description"],
+        category=row["category"],
+        source=row["source"],
+        source_ref=row["source_ref"],
+        note=row["note"],
+        created_at=_as_datetime(row["created_at"]),
+    )
+
+
+def add_expense(conn: sqlite3.Connection, expense: Expense) -> int | None:
+    """Insert an expense. Returns id, or None when a keyed duplicate already exists."""
+    try:
+        cursor = conn.execute(
+            """
+            INSERT INTO expenses (
+                spent_on, amount, description, category, source, source_ref, note, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _iso(expense.spent_on),
+                expense.amount,
+                expense.description.strip(),
+                expense.category,
+                expense.source,
+                expense.source_ref,
+                expense.note,
+                (expense.created_at or datetime.now()).isoformat(timespec="seconds"),
+            ),
+        )
+        conn.commit()
+        return int(cursor.lastrowid or 0)
+    except sqlite3.IntegrityError:
+        return None
+
+
+def list_expenses(
+    conn: sqlite3.Connection, *, start: date, end: date
+) -> list[Expense]:
+    """Expenses with spent_on in [start, end)."""
+    rows = conn.execute(
+        """
+        SELECT * FROM expenses
+        WHERE spent_on >= ? AND spent_on < ?
+        ORDER BY spent_on DESC, id DESC
+        """,
+        (_iso(start), _iso(end)),
+    ).fetchall()
+    return [_expense_from_row(row) for row in rows]
+
+
+def get_expense(conn: sqlite3.Connection, expense_id: int) -> Expense | None:
+    row = conn.execute("SELECT * FROM expenses WHERE id = ?", (expense_id,)).fetchone()
+    return _expense_from_row(row) if row else None
+
+
+def update_expense(
+    conn: sqlite3.Connection,
+    expense_id: int,
+    *,
+    spent_on: date,
+    amount: float,
+    description: str,
+    category: str | None,
+    note: str | None = None,
+) -> bool:
+    """Update editable fields; leaves source / source_ref alone. True if a row changed."""
+    cursor = conn.execute(
+        """
+        UPDATE expenses
+        SET spent_on = ?, amount = ?, description = ?, category = ?, note = ?
+        WHERE id = ?
+        """,
+        (_iso(spent_on), amount, description.strip(), category, note, expense_id),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def delete_expense(conn: sqlite3.Connection, expense_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def expense_total(conn: sqlite3.Connection, *, start: date, end: date) -> float:
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(amount), 0) AS total FROM expenses
+        WHERE spent_on >= ? AND spent_on < ?
+        """,
+        (_iso(start), _iso(end)),
+    ).fetchone()
+    return float(row["total"])
+
+
+def expense_months(conn: sqlite3.Connection) -> list[str]:
+    """YYYY-MM keys that have at least one expense, newest first."""
+    rows = conn.execute(
+        """
+        SELECT DISTINCT strftime('%Y-%m', spent_on) AS month
+        FROM expenses
+        WHERE spent_on IS NOT NULL
+        ORDER BY month DESC
+        """
+    ).fetchall()
+    return [row["month"] for row in rows if row["month"]]
 
 
 def payments_since(conn: sqlite3.Connection, card_id: int, since: date | None) -> float:

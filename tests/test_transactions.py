@@ -106,8 +106,9 @@ def test_a_payment_is_categorised_ahead_of_any_merchant_match():
     assert txns.categorise("IOCL FUEL STATION") == "Fuel"
 
 
-def test_the_printed_grid_wins_over_the_text():
-    rows = txns.extract_transactions("\n".join(STATEMENT_WITH_TRANSACTIONS), TRANSACTION_TABLE)
+def test_a_richer_grid_wins_over_shorter_text():
+    short_text = "12/06/2026 ONLY ONE LINE ITEM 480.00\n"
+    rows = txns.extract_transactions(short_text, TRANSACTION_TABLE)
 
     assert [txn.description for txn in rows] == [
         "ZOMATO ONLINE ORDER",
@@ -116,10 +117,24 @@ def test_the_printed_grid_wins_over_the_text():
     ]
 
 
-def test_the_text_is_used_when_there_is_no_grid():
-    rows = txns.extract_transactions("\n".join(STATEMENT_WITH_TRANSACTIONS), [])
-
-    assert len(rows) == 4
+def test_lines_win_over_a_sparse_table():
+    """A partial pdfplumber table must not wipe out a full line extract."""
+    lines = "\n".join(
+        [
+            "01/07/2026 MERCHANT ONE 100.00",
+            "02/07/2026 MERCHANT TWO 200.00",
+            "03/07/2026 MERCHANT THREE 300.00",
+        ]
+    )
+    sparse_table = [
+        [
+            ["Date", "Details", "Amount"],
+            ["01/07/2026", "ONLY ONE ROW", "100.00"],
+            ["02/07/2026", "SECOND", "200.00"],
+        ]
+    ]
+    rows = txns.extract_transactions(lines, sparse_table)
+    assert len(rows) == 3
 
 
 def test_ingesting_a_statement_stores_its_line_items(conn, card, tmp_path):
