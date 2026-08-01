@@ -4,9 +4,9 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import db, gmail, ingest, issuers
-from carddues.models import Card, SOURCE_STATEMENT, StatementRecord
-from carddues.web.app import create_app
+from mydues import db, gmail, ingest, issuers
+from mydues.models import Card, SOURCE_STATEMENT, StatementRecord
+from mydues.web.app import create_app
 
 from .fixtures import ICICI_AMAZON_DOUBLED_HEADERS, write_pdf
 

@@ -4,11 +4,11 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import db, gmail, ingest
-from carddues.models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
-from carddues.parsers import parse_statement
-from carddues.statement_gate import is_credit_card_mail, looks_like_credit_card_statement
-from carddues.text import normalize
+from mydues import db, gmail, ingest
+from mydues.models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
+from mydues.parsers import parse_statement
+from mydues.statement_gate import is_credit_card_mail, looks_like_credit_card_statement
+from mydues.text import normalize
 
 from . import fixtures
 
@@ -78,7 +78,7 @@ def test_sbi_bill_with_mitc_footnote_still_counts_as_a_statement():
 
 
 def test_yes_bank_sender_domain_is_registered():
-    from carddues import issuers
+    from mydues import issuers
 
     assert "yes.bank.in" in issuers.get("yesbank").senders
     assert issuers.detect_from_sender("<estatement@yes.bank.in>") == "yesbank"
@@ -166,7 +166,7 @@ def test_init_retargets_hdfc_2476_and_purges_icici_0001(conn):
 
 
 def test_hdfc_swiggy_prefers_card_no_over_alternate_account():
-    from carddues.text import find_card_last4
+    from mydues.text import find_card_last4
 
     raw = fixtures.HDFC_SWIGGY_ALTERNATE
     assert find_card_last4(raw) == "6527"

@@ -2,9 +2,9 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import db, dues
-from carddues.models import SOURCE_MANUAL, SOURCE_STATEMENT, Card, StatementRecord
-from carddues.web.app import create_app
+from mydues import db, dues
+from mydues.models import SOURCE_MANUAL, SOURCE_STATEMENT, Card, StatementRecord
+from mydues.web.app import create_app
 
 
 @pytest.fixture

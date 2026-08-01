@@ -2,8 +2,8 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from carddues import db, dues
-from carddues.models import SOURCE_MANUAL, SOURCE_STATEMENT, Card, StatementRecord
+from mydues import db, dues
+from mydues.models import SOURCE_MANUAL, SOURCE_STATEMENT, Card, StatementRecord
 
 TODAY = date(2026, 7, 31)
 

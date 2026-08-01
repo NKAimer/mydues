@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Card dues</title>
+  <title>Mydues</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
@@ -11,7 +11,7 @@
 
   <header class="masthead">
     <div>
-      <h1>Card dues</h1>
+      <h1>Mydues</h1>
       <p class="sub">{{ today.strftime('%A, %d %B %Y') }}</p>
     </div>
     <div class="masthead-actions">
@@ -592,7 +592,7 @@
             </div>
           </details>
         {% elif view.transactions_missing %}
-          <p class="txns-missing">Transactions not read for this statement. Run <code>carddues reparse</code> after a parser fix, or <code>carddues audit</code>.</p>
+          <p class="txns-missing">Transactions not read for this statement. Run <code>mydues reparse</code> after a parser fix, or <code>mydues audit</code>.</p>
         {% endif %}
 
         <div class="actions">

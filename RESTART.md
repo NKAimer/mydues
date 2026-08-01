@@ -17,9 +17,9 @@ lsof -ti tcp:8765 | xargs kill
 From the project directory (after setup — see [README.md](README.md)):
 
 ```bash
-cd /path/to/card-dues
-.venv/bin/python -m carddues serve
-# or: uv run carddues serve
+cd /path/to/mydues
+.venv/bin/python -m mydues serve
+# or: uv run mydues serve
 ```
 
 The dashboard will be available at:
@@ -29,7 +29,7 @@ The dashboard will be available at:
 Keep this terminal open while using the dashboard. To run it in the background:
 
 ```bash
-.venv/bin/python -m carddues serve > /tmp/carddues-server.log 2>&1 &
+.venv/bin/python -m mydues serve > /tmp/mydues-server.log 2>&1 &
 ```
 
 ## 3. Verify the restart
@@ -51,7 +51,7 @@ An HTTP `200` means the dashboard is responding. You should see three tabs:
 To automatically reload Python and template changes while developing:
 
 ```bash
-.venv/bin/python -m carddues serve --debug
+.venv/bin/python -m mydues serve --debug
 ```
 
 Do not use debug mode when exposing the dashboard beyond your local machine.
@@ -78,7 +78,7 @@ lsof -nP -iTCP:8765 -sTCP:LISTEN
 Start on another port if necessary:
 
 ```bash
-.venv/bin/python -m carddues serve --port 8766
+.venv/bin/python -m mydues serve --port 8766
 ```
 
 Then open <http://127.0.0.1:8766>. If you use a web OAuth client, add the matching

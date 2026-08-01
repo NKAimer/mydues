@@ -2,7 +2,7 @@
 
 import pytest
 
-from carddues import issuers
+from mydues import issuers
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-# card-dues
+# mydues
 
 Track what you owe on your Indian credit cards, in one place, on your own machine.
 
@@ -8,7 +8,7 @@ transactions per card, and shows them in a local dashboard. A separate Expenses
 tab pulls bank / UPI spend-alert emails into a monthly ledger. Anything it cannot
 read, you type in yourself. Dates are written and read as **dd/mm/yyyy** throughout.
 
-![The card-dues dashboard](docs/screenshot.png)
+![The mydues dashboard](docs/screenshot.png)
 
 ## What this can and cannot tell you
 
@@ -37,7 +37,7 @@ as just another `source` alongside `statement` and `manual`.
 - A Gmail account that receives your card statements (and optionally spend alerts)
 - A Google Cloud project with the **Gmail API** enabled and an OAuth client
   (setup below)
-- macOS is the primary target for `carddues notify` and the LaunchAgent script;
+- macOS is the primary target for `mydues notify` and the LaunchAgent script;
   the web app and CLI work on any OS that can run Python
 
 Optional: [uv](https://docs.astral.sh/uv/) if you prefer lockfile-based installs
@@ -50,26 +50,26 @@ Clone the repo, then install dependencies and initialise the local database.
 ### With pip / venv
 
 ```bash
-git clone <repo-url> card-dues
-cd card-dues
+git clone https://github.com/NKAimer/mydues.git mydues
+cd mydues
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install -e .
-.venv/bin/python -m carddues init
+.venv/bin/python -m mydues init
 ```
 
 ### With uv
 
 ```bash
-git clone <repo-url> card-dues
-cd card-dues
+git clone https://github.com/NKAimer/mydues.git mydues
+cd mydues
 uv sync
-uv run carddues init
+uv run mydues init
 ```
 
-`init` creates `~/.carddues/` (mode `0700`) with an empty SQLite database and an
-attachments directory. After an editable install, the `carddues` command is on
-your PATH inside the venv; otherwise use `.venv/bin/python -m carddues …`.
+`init` creates `~/.mydues/` (mode `0700`) with an empty SQLite database and an
+attachments directory. After an editable install, the `mydues` command is on
+your PATH inside the venv; otherwise use `.venv/bin/python -m mydues …`.
 
 For development / tests, also install:
 
@@ -95,22 +95,22 @@ For development / tests, also install:
      http://127.0.0.1:8765/oauth/callback
      ```
 
-4. Download the JSON and save it as `~/.carddues/credentials.json`
-   (or set `CARDDUES_CREDENTIALS` to another path).
+4. Download the JSON and save it as `~/.mydues/credentials.json`
+   (or set `MYDUES_CREDENTIALS` to another path).
 5. Start the dashboard and click **Connect Gmail**. Google's consent screen opens,
    and the redirect back finishes the connection — no terminal step.
 
 ```bash
-.venv/bin/python -m carddues serve
+.venv/bin/python -m mydues serve
 # open http://127.0.0.1:8765
 ```
 
 If you serve on a different port, the dashboard prints the exact redirect URI to
 register. A desktop client can also be authorised from the terminal with
-`.venv/bin/python -m carddues auth`.
+`.venv/bin/python -m mydues auth`.
 
 The scope requested is `gmail.readonly`, so this can list and download mail but
-never send, modify or delete it. The token is stored at `~/.carddues/token.json`
+never send, modify or delete it. The token is stored at `~/.mydues/token.json`
 with owner-only permissions. **Disconnect Gmail** on the dashboard forgets that
 token; to revoke the grant itself, remove the app from your
 [Google account permissions](https://myaccount.google.com/permissions).
@@ -123,14 +123,18 @@ in [RESTART.md](RESTART.md).
 
 | Variable / path | Purpose |
 |-----------------|--------|
-| `CARDDUES_HOME` | Data directory (default `~/.carddues`) |
-| `CARDDUES_CREDENTIALS` | Path to Google OAuth client JSON (default `$CARDDUES_HOME/credentials.json`) |
-| `CARDDUES_CATEGORIES_SEED` | Phrase/merchant seed JSON (default `data/categories.json` in the repo) |
-| `$CARDDUES_HOME/carddues.db` | SQLite database (cards, statements, transactions, expenses, categories) |
-| `$CARDDUES_HOME/credentials.json` | OAuth client downloaded from Google Cloud |
-| `$CARDDUES_HOME/token.json` | Access + refresh tokens after Connect Gmail |
-| `$CARDDUES_HOME/attachments/` | Downloaded statement PDFs (usually deleted after parse) |
-| `$CARDDUES_HOME/session_secret` | Flask session key (auto-created, mode `0600`) |
+| `MYDUES_HOME` | Data directory (default `~/.mydues`) |
+| `MYDUES_CREDENTIALS` | Path to Google OAuth client JSON (default `$MYDUES_HOME/credentials.json`) |
+| `MYDUES_CATEGORIES_SEED` | Phrase/merchant seed JSON (default `data/categories.json` in the repo) |
+| `$MYDUES_HOME/mydues.db` | SQLite database (cards, statements, transactions, expenses, categories) |
+| `$MYDUES_HOME/credentials.json` | OAuth client downloaded from Google Cloud |
+| `$MYDUES_HOME/token.json` | Access + refresh tokens after Connect Gmail |
+| `$MYDUES_HOME/attachments/` | Downloaded statement PDFs (usually deleted after parse) |
+| `$MYDUES_HOME/session_secret` | Flask session key (auto-created, mode `0600`) |
+
+Existing installs that still have `~/.carddues` are moved automatically to
+`~/.mydues` (and `carddues.db` → `mydues.db`) on first run. Deprecated
+`CARDDUES_*` env vars are still read when the matching `MYDUES_*` var is unset.
 
 Nothing is sent anywhere except Google's OAuth and Gmail APIs for mail you already
 own. This project never asks for net banking credentials and does no screen scraping.
@@ -143,9 +147,9 @@ is treated as stale.
 ## Dashboard
 
 ```bash
-carddues serve                  # http://127.0.0.1:8765
-carddues serve --port 8766      # different port → update OAuth redirect URI
-carddues serve --debug          # auto-reload while developing (local only)
+mydues serve                  # http://127.0.0.1:8765
+mydues serve --port 8766      # different port → update OAuth redirect URI
+mydues serve --debug          # auto-reload while developing (local only)
 ```
 
 Three tabs:
@@ -196,59 +200,59 @@ Shared rules for statement line items and the expenses ledger.
 - To version category rules in git (not the full DB), export then commit:
 
 ```bash
-carddues categories export          # writes data/categories.json
+mydues categories export          # writes data/categories.json
 git add data/categories.json && git commit
 ```
 
-On another machine (or after `git pull`), `carddues init` / starting the dashboard
+On another machine (or after `git pull`), `mydues init` / starting the dashboard
 merges that file into the local DB (`INSERT OR IGNORE` — existing local rows win).
-Or run `carddues categories import` explicitly. Override the path with
-`CARDDUES_CATEGORIES_SEED` if needed.
+Or run `mydues categories import` explicitly. Override the path with
+`MYDUES_CATEGORIES_SEED` if needed.
 
 ## CLI workflows
 
-After `pip install -e .` (or `uv sync`), use `carddues`. Otherwise prefix with
-`.venv/bin/python -m carddues`.
+After `pip install -e .` (or `uv sync`), use `mydues`. Otherwise prefix with
+`.venv/bin/python -m mydues`.
 
 ```bash
 # Register a card. Name and date of birth are used to derive PDF passwords.
 # Adding a card also retries the statements still waiting to be opened.
-carddues cards add --issuer hdfc --last4 8765 --label "HDFC Infinia" \
+mydues cards add --issuer hdfc --last4 8765 --label "HDFC Infinia" \
                    --limit 500000 --name "Naveen Kumar" --dob 01/07/1990
-carddues cards list
-carddues cards remove 8765
+mydues cards list
+mydues cards remove 8765
 
 # Fetch and parse statements from Gmail
-carddues ingest --show
-carddues ingest --days 120 --limit 50 --keep-files
+mydues ingest --show
+mydues ingest --days 120 --limit 50 --keep-files
 
 # Or parse a PDF you already have
-carddues import ~/Downloads/statement.pdf --password mypassword
+mydues import ~/Downloads/statement.pdf --password mypassword
 
 # Type in anything the parser could not read; manual entries always win
-carddues set 8765 --total 45231.50 --min 2270 --due 03/08/2026
+mydues set 8765 --total 45231.50 --min 2270 --due 03/08/2026
 
 # Record a payment (defaults to the full outstanding amount)
-carddues paid 8765 --amount 20000
+mydues paid 8765 --amount 20000
 
 # Open a statement that stayed locked; the password is kept for next month
-carddues unlock 'NAVE1504' --file statement.pdf
+mydues unlock 'NAVE1504' --file statement.pdf
 
 # Work through the backlog of waiting attachments, a batch at a time (40 default)
-carddues reprocess --issuer hdfc
+mydues reprocess --issuer hdfc
 
 # Re-read already-parsed PDFs after a parser fix (Fetch skips those)
-carddues reparse --issuer icici
+mydues reparse --issuer icici
 
-carddues show          # table in the terminal
-carddues show --json   # machine readable
-carddues log           # what the last ingest did with each attachment
-carddues audit         # weak / incomplete parses across cards
+mydues show          # table in the terminal
+mydues show --json   # machine readable
+mydues log           # what the last ingest did with each attachment
+mydues audit         # weak / incomplete parses across cards
 
-carddues categories export   # data/categories.json for git
-carddues categories import   # merge seed into local DB
+mydues categories export   # data/categories.json for git
+mydues categories import   # merge seed into local DB
 
-carddues serve         # dashboard on http://127.0.0.1:8765
+mydues serve         # dashboard on http://127.0.0.1:8765
 ```
 
 Supported `--issuer` keys include: `hdfc`, `icici`, `sbicard`, `axis`, `kotak`,
@@ -257,30 +261,30 @@ Supported `--issuer` keys include: `hdfc`, `icici`, `sbicard`, `axis`, `kotak`,
 
 ### Daily refresh and notifications
 
-`carddues notify` sends a **macOS** notification when a card is overdue or due
+`mydues notify` sends a **macOS** notification when a card is overdue or due
 within three days. To run ingest + notify every morning, edit the path in
-`scripts/com.carddues.refresh.plist` (replace `REPLACE_WITH_PROJECT_PATH`) and
+`scripts/com.mydues.refresh.plist` (replace `REPLACE_WITH_PROJECT_PATH`) and
 load it:
 
 ```bash
-cp scripts/com.carddues.refresh.plist ~/Library/LaunchAgents/
+cp scripts/com.mydues.refresh.plist ~/Library/LaunchAgents/
 # edit REPLACE_WITH_PROJECT_PATH in the copied file
-launchctl load ~/Library/LaunchAgents/com.carddues.refresh.plist
+launchctl load ~/Library/LaunchAgents/com.mydues.refresh.plist
 ```
 
 ## How parsing works
 
-`carddues/parsers/base.py` handles the two layouts statements actually use:
+`mydues/parsers/base.py` handles the two layouts statements actually use:
 
 - **Inline** — `Total Amount Due : Rs. 1,12,480.35`
 - **Table** — a row of labels with the values in the row beneath, aligned by
   column position so an extra unlabelled column does not shift everything
 
-Issuer parsers in `carddues/parsers/banks.py` only declare which wording that
+Issuer parsers in `mydues/parsers/banks.py` only declare which wording that
 issuer prefers; the shared extractor does the rest. Amounts understand Indian
 digit grouping and a trailing `Cr` (a credit balance, stored as negative).
 
-`carddues/parsers/transactions.py` reads the line items. A statement that rules
+`mydues/parsers/transactions.py` reads the line items. A statement that rules
 its transactions into a grid names its columns, so those are read first, category
 column included. The rest print one transaction per line, opening with a date and
 closing with an amount, which is what separates a transaction from the summary
@@ -289,13 +293,13 @@ confuse it. Most Indian statements print no category at all, so the merchant nam
 is matched against phrase / keyword rules and the result is marked **guess** in
 the table to keep it apart from a category the issuer itself printed.
 
-To add an issuer, add an entry to `carddues/issuers.py` with its sending domains
+To add an issuer, add an entry to `mydues/issuers.py` with its sending domains
 and a text marker, then a small class in `banks.py` if its wording is unusual.
 Unknown issuers fall through to the generic parser, which handles most formats.
 
 ## How locked statements are opened
 
-Issuers state the password rule in the covering mail, so `carddues/passwords.py`
+Issuers state the password rule in the covering mail, so `mydues/passwords.py`
 reads it rather than guessing. It looks only at the sentences mentioning the
 password, breaks the rule into components — "first 4 letters of your name in
 capitals", "date of birth in DDMM", "last 4 digits of your card" — and fills them
@@ -320,7 +324,7 @@ version show none until they are tried again — and they are, since every card 
 add sets the waiting attachments going through the same route, re-downloading each
 one from its mail when it is no longer on disk. A pass takes 40 attachments and
 says how many are left, so **Try these again** on the dashboard (or
-`carddues reprocess`) works through a long backlog without a request that never
+`mydues reprocess`) works through a long backlog without a request that never
 ends. The pass covers that issuer's attachments plus any whose issuer was never
 recorded, which is what older log rows look like.
 
@@ -330,11 +334,11 @@ recorded, which is what older log rows look like.
 |---------|-------------|
 | Dashboard shows **Fetch from Gmail** but Connect never worked / old UI | Another process still owns port 8765 — see [RESTART.md](RESTART.md) |
 | Gmail fetch fails after ~7 days | OAuth consent still in **Testing** — reconnect, or publish to Production ([docs/gmail-oauth.md](docs/gmail-oauth.md)) |
-| Statements stay **locked** | Add `--name` / `--dob` (and last4) on the card, or unlock once on the dashboard / `carddues unlock` |
+| Statements stay **locked** | Add `--name` / `--dob` (and last4) on the card, or unlock once on the dashboard / `mydues unlock` |
 | Wrong billed month total | Cards tab uses **`total_due`** for statements in the **10th–9th** window (e.g. July = 10 Jul–9 Aug), not txn calendar days |
 | Expenses empty after Fetch | Alerts need matching subjects and no PDF attachment; statements are excluded on purpose |
-| Parser missed dues / dates | `carddues set` for a manual override; `carddues audit` / `carddues reparse` after a parser fix |
-| Move all data | Set `CARDDUES_HOME` before any command; copy the old directory if migrating |
+| Parser missed dues / dates | `mydues set` for a manual override; `mydues audit` / `mydues reparse` after a parser fix |
+| Move all data | Set `MYDUES_HOME` before any command; copy the old directory if migrating |
 
 ## Tests
 
@@ -354,5 +358,5 @@ routes.
 Developer helper (writes golden fixtures from your own kept PDFs):
 
 ```bash
-carddues dump-golden --out tests/golden
+mydues dump-golden --out tests/golden
 ```

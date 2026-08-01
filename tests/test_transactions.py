@@ -2,10 +2,10 @@
 
 import pytest
 
-from carddues import db, dues, ingest
-from carddues.models import CATEGORY_GUESS, CATEGORY_STATEMENT, Card
-from carddues.parsers import transactions as txns
-from carddues.web.app import create_app
+from mydues import db, dues, ingest
+from mydues.models import CATEGORY_GUESS, CATEGORY_STATEMENT, Card
+from mydues.parsers import transactions as txns
+from mydues.web.app import create_app
 
 from .fixtures import (
     HDFC_TABLE,

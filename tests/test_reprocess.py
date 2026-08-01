@@ -4,9 +4,9 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import db, gmail, ingest
-from carddues.models import Card
-from carddues.web.app import create_app
+from mydues import db, gmail, ingest
+from mydues.models import Card
+from mydues.web.app import create_app
 
 from .fixtures import STATEMENT_WITH_TRANSACTIONS, write_pdf
 

@@ -4,8 +4,8 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import db
-from carddues.models import (
+from mydues import db
+from mydues.models import (
     KIND_CREDIT,
     KIND_DEBIT,
     SOURCE_STATEMENT,
@@ -13,7 +13,7 @@ from carddues.models import (
     StatementRecord,
     Transaction,
 )
-from carddues.web.app import _card_billing_window, create_app
+from mydues.web.app import _card_billing_window, create_app
 
 
 @pytest.fixture

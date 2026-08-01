@@ -1,12 +1,12 @@
 # Gmail OAuth: expiry and renewal
 
 Card Dues uses Google OAuth with scope `gmail.readonly` for statement PDFs and
-(separately) expense-alert emails. Files live under `~/.carddues/` (or
-`$CARDDUES_HOME`):
+(separately) expense-alert emails. Files live under `~/.mydues/` (or
+`$MYDUES_HOME`):
 
 | File | Role |
 |------|------|
-| `credentials.json` | OAuth client from Google Cloud Console (or path from `CARDDUES_CREDENTIALS`) |
+| `credentials.json` | OAuth client from Google Cloud Console (or path from `MYDUES_CREDENTIALS`) |
 | `token.json` | Access + refresh tokens after **Connect Gmail** |
 
 Full first-time setup (Cloud Console, Desktop vs Web client, redirect URI) is in
@@ -25,7 +25,7 @@ You only need to reconnect when the **refresh token** dies or is revoked.
 
 ## Renew (refresh token expired)
 
-1. Start the dashboard: `.venv/bin/python -m carddues serve`
+1. Start the dashboard: `.venv/bin/python -m mydues serve`
 2. Click **Disconnect Gmail** (clears `token.json`)
 3. Optional: revoke the app at https://myaccount.google.com/permissions
 4. Click **Connect Gmail** and finish consent
@@ -35,14 +35,14 @@ You only need to reconnect when the **refresh token** dies or is revoked.
 Or from a terminal (desktop OAuth client only):
 
 ```bash
-.venv/bin/python -m carddues auth
+.venv/bin/python -m mydues auth
 ```
 
-Web clients must use the dashboard Connect flow; `carddues auth` will tell you so.
+Web clients must use the dashboard Connect flow; `mydues auth` will tell you so.
 
 If `credentials.json` is missing, recreate the OAuth client in Google Cloud
-Console, enable the Gmail API, download JSON to `~/.carddues/credentials.json`
-(or your `CARDDUES_CREDENTIALS` path), then Connect again.
+Console, enable the Gmail API, download JSON to `~/.mydues/credentials.json`
+(or your `MYDUES_CREDENTIALS` path), then Connect again.
 
 ## Move OAuth consent from Testing to Production
 

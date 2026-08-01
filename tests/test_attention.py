@@ -5,9 +5,9 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import config, db, gmail, ingest, passwords
-from carddues.models import Card
-from carddues.web.app import create_app
+from mydues import config, db, gmail, ingest, passwords
+from mydues.models import Card
+from mydues.web.app import create_app
 
 from .fixtures import write_pdf
 
@@ -65,7 +65,7 @@ def test_the_head_line_shows_the_mailer_address_and_date(client, conn):
 
 
 def test_email_address_strips_the_display_name():
-    from carddues.web.app import _email_address
+    from mydues.web.app import _email_address
 
     assert _email_address("HDFC Bank <estatement@hdfcbank.net>") == "estatement@hdfcbank.net"
     assert _email_address("cbssbi.cas@alerts.sbi.co.in") == "cbssbi.cas@alerts.sbi.co.in"
@@ -206,7 +206,7 @@ def card_with_details(conn):
 
 def test_an_older_database_gains_the_new_columns(tmp_path, monkeypatch):
     """Databases created before this feature must keep working."""
-    monkeypatch.setenv("CARDDUES_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MYDUES_HOME", str(tmp_path / "home"))
     config.ensure_dirs()
     old = sqlite3.connect(config.db_path())
     old.executescript(

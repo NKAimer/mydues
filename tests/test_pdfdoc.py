@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from carddues import passwords, pdfdoc
-from carddues.models import Card
+from mydues import passwords, pdfdoc
+from mydues.models import Card
 
 from .fixtures import write_pdf as _write_pdf
 
@@ -46,13 +46,13 @@ def test_wrong_passwords_do_not_leave_temp_files_or_open_fds(tmp_path):
     path = tmp_path / "locked.pdf"
     _write_pdf(path, password="nave0107")
     guesses = [f"wrong-{index}" for index in range(80)]
-    before_temps = set(Path(tempfile.gettempdir()).glob("carddues-*.pdf"))
+    before_temps = set(Path(tempfile.gettempdir()).glob("mydues-*.pdf"))
     before_fds = _open_fd_count()
 
     with pytest.raises(pdfdoc.LockedPdfError):
         pdfdoc.extract(path, guesses)
 
-    after_temps = set(Path(tempfile.gettempdir()).glob("carddues-*.pdf"))
+    after_temps = set(Path(tempfile.gettempdir()).glob("mydues-*.pdf"))
     assert after_temps <= before_temps
     # A handful of other FDs may open in the process; dozens must not.
     assert _open_fd_count() - before_fds < 10

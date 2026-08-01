@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from carddues.categories import (
+from mydues.categories import (
     CATEGORY_MEMORY,
     UNCATEGORIZED,
     apply_category_rules,
@@ -15,8 +15,8 @@ from carddues.categories import (
     remember_merchant_category,
     resolve_category,
 )
-from carddues import db, expense_ingest
-from carddues.models import (
+from mydues import db, expense_ingest
+from mydues.models import (
     CATEGORY_GUESS,
     CATEGORY_STATEMENT,
     CATEGORY_USER,
@@ -29,7 +29,7 @@ from carddues.models import (
     StatementRecord,
     Transaction,
 )
-from carddues.web.app import create_app
+from mydues.web.app import create_app
 
 
 @pytest.fixture
@@ -424,8 +424,8 @@ def test_printed_beats_user_phrase(conn):
 
 
 def test_store_reresolves_with_conn_phrase(conn):
-    from carddues.ingest import store
-    from carddues.models import ParsedStatement
+    from mydues.ingest import store
+    from mydues.models import ParsedStatement
 
     card = Card(issuer="hdfc", label="HDFC Infinia", last4="8765")
     card.id = db.add_card(conn, card)

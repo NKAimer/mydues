@@ -47,7 +47,7 @@ def _decrypt_to_temp(path: Path, password: str) -> Path:
     what exhausted the process (Errno 24) when a card was added.
     """
     with pikepdf.open(path, password=password) as pdf:
-        fd, name = tempfile.mkstemp(suffix=".pdf", prefix="carddues-")
+        fd, name = tempfile.mkstemp(suffix=".pdf", prefix="mydues-")
         os.close(fd)
         target = Path(name)
         try:

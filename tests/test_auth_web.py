@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from carddues import config, gmail
-from carddues.web.app import create_app
+from mydues import config, gmail
+from mydues.web.app import create_app
 
 CLIENT_ID = "1234.apps.googleusercontent.com"
 

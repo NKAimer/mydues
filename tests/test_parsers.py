@@ -2,8 +2,8 @@ from datetime import date
 
 import pytest
 
-from carddues.parsers import parse_statement
-from carddues.text import normalize, parse_statement_date, undouble_glyphs
+from mydues.parsers import parse_statement
+from mydues.text import normalize, parse_statement_date, undouble_glyphs
 
 from . import fixtures
 
@@ -85,7 +85,7 @@ def test_hdfc_compact_mask_is_preferred_over_alternate_account():
 
 def test_hdfc_tata_neu_live_layout_never_registers_0722():
     """Alternate Account …0722758 must not invent card ••0722."""
-    from carddues.text import find_card_last4
+    from mydues.text import find_card_last4
 
     raw = fixtures.HDFC_TATA_NEU_LIVE_LAYOUT
     assert find_card_last4(raw) == "2750"
@@ -134,7 +134,7 @@ def test_axis_value_on_following_line():
 
 def test_axis_payment_summary_table_not_formula_or_tnc():
     """Flipkart/Airtel/Ace Axis PDFs: header totals beat =Total Payment Due and T&Cs."""
-    from carddues.text import find_card_last4
+    from mydues.text import find_card_last4
 
     raw = fixtures.AXIS_PAYMENT_SUMMARY
     assert find_card_last4(raw) == "0406"
@@ -199,7 +199,7 @@ def test_hsbc_inline_layout():
 
 
 def test_hsbc_live_prefers_total_payment_due_over_net_outstanding():
-    from carddues.text import find_card_last4
+    from mydues.text import find_card_last4
 
     raw = fixtures.HSBC_LIVE_JULY
     assert find_card_last4(raw) == "7672"
@@ -216,8 +216,8 @@ def test_hsbc_live_prefers_total_payment_due_over_net_outstanding():
 
 
 def test_hsbc_live_extracts_ddmmm_transactions():
-    from carddues.parsers.transactions import extract_transactions
-    from carddues.text import normalize
+    from mydues.parsers.transactions import extract_transactions
+    from mydues.text import normalize
 
     rows = extract_transactions(normalize(fixtures.HSBC_LIVE_JULY))
     descriptions = [txn.description for txn in rows]
@@ -233,7 +233,7 @@ def test_hsbc_live_extracts_ddmmm_transactions():
 
 
 def test_sbi_partial_tail_is_exposed_for_card_matching():
-    from carddues.text import find_card_last4, find_card_tail
+    from mydues.text import find_card_last4, find_card_tail
 
     raw = fixtures.SBICARD_PARTIAL_TAIL
     assert find_card_last4(raw) is None

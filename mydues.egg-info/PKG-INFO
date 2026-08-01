@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: mydues
+Version: 0.1.0
+Summary: Track Indian credit card dues from statement emails
+Requires-Python: >=3.11
+Requires-Dist: google-api-python-client>=2.180
+Requires-Dist: google-auth>=2.40
+Requires-Dist: google-auth-oauthlib>=1.2
+Requires-Dist: pikepdf>=9.5
+Requires-Dist: pdfplumber>=0.11
+Requires-Dist: python-dateutil>=2.9
+Requires-Dist: Flask>=3.1
+Requires-Dist: rich>=14.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.4; extra == "dev"

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from carddues.parsers import parse_statement
-from carddues.text import normalize
+from mydues.parsers import parse_statement
+from mydues.text import normalize
 
 GOLDEN = Path(__file__).parent / "golden"
 

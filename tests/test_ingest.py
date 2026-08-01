@@ -2,8 +2,8 @@ from datetime import date
 
 import pytest
 
-from carddues import db, dues, ingest
-from carddues.models import Card, ParsedStatement
+from mydues import db, dues, ingest
+from mydues.models import Card, ParsedStatement
 
 STATEMENT = ParsedStatement(
     total_due=45231.50,

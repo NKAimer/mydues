@@ -201,7 +201,7 @@ def authorize(*, interactive: bool = True):
         if not interactive:
             raise GmailNotConfigured(
                 "Gmail is not connected. Open the dashboard and use Connect Gmail, "
-                "or run `carddues auth` from a terminal."
+                "or run `mydues auth` from a terminal."
             )
         flow = InstalledAppFlow.from_client_secrets_file(str(client_file()), SCOPES)
         creds = flow.run_local_server(port=0)

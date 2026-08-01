@@ -66,7 +66,7 @@ def _select_card(conn, selector: str) -> Card:
     if len(matches) == 1:
         return matches[0]
     if not matches:
-        raise SystemExit(f"No card matches {selector!r}. Run `carddues cards list`.")
+        raise SystemExit(f"No card matches {selector!r}. Run `mydues cards list`.")
     raise SystemExit(f"{selector!r} matches several cards; use the card id")
 
 
@@ -167,7 +167,7 @@ def cmd_auth(args) -> int:
     if gmail.client_type() == "web":
         console.print(
             "That OAuth client is a web client, which needs the browser flow. "
-            "Run [bold]carddues serve[/bold] and click Connect Gmail."
+            "Run [bold]mydues serve[/bold] and click Connect Gmail."
         )
         return 1
     try:
@@ -209,7 +209,7 @@ def cmd_cards_list(args) -> int:
     db.init(conn)
     cards = db.list_cards(conn)
     if not cards:
-        console.print("No cards yet. Add one with `carddues cards add`.")
+        console.print("No cards yet. Add one with `mydues cards add`.")
         return 0
     table = Table(title="Cards")
     for column in ("ID", "Label", "Issuer", "Last 4", "Limit", "Unlock details"):
@@ -267,7 +267,7 @@ def cmd_ingest(args) -> int:
     if summary.needs_attention:
         console.print(
             "[dim]Locked files usually mean the card's name/date of birth is missing. "
-            "Add them with `carddues cards add`, or enter the amount with `carddues set`.[/dim]"
+            "Add them with `mydues cards add`, or enter the amount with `mydues set`.[/dim]"
         )
     return cmd_show(args) if args.show else 0
 
@@ -478,7 +478,7 @@ def cmd_show(args) -> int:
         return 0
 
     if not book.views:
-        console.print("No cards yet. Add one with `carddues cards add`.")
+        console.print("No cards yet. Add one with `mydues cards add`.")
         return 0
 
     table = Table(title="Credit card dues", caption="Billed amounts, not live balances")
@@ -610,7 +610,7 @@ def cmd_categories_import(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="carddues", description="Track Indian credit card dues")
+    parser = argparse.ArgumentParser(prog="mydues", description="Track Indian credit card dues")
     parser.add_argument("-v", "--verbose", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 

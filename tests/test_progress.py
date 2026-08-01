@@ -4,9 +4,9 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import db, gmail, ingest
-from carddues.models import SOURCE_STATEMENT, Card, StatementRecord
-from carddues.web.app import create_app
+from mydues import db, gmail, ingest
+from mydues.models import SOURCE_STATEMENT, Card, StatementRecord
+from mydues.web.app import create_app
 
 from .fixtures import ICICI_AMAZON_DOUBLED_HEADERS, write_pdf
 
@@ -141,8 +141,8 @@ def test_ingest_stream_rejects_unknown_job(client, conn):
 def test_expense_stream_uses_lookback_days_without_request_context_error(
     client, conn, monkeypatch
 ):
-    from carddues import expense_ingest
-    from carddues.expense_ingest import ExpenseIngestSummary
+    from mydues import expense_ingest
+    from mydues.expense_ingest import ExpenseIngestSummary
 
     monkeypatch.setattr(gmail, "is_connected", lambda: True)
     captured: dict = {}
@@ -163,8 +163,8 @@ def test_expense_stream_uses_lookback_days_without_request_context_error(
 
 
 def test_statement_stream_uses_lookback_months(client, conn, monkeypatch):
-    from carddues import ingest as ingest_mod
-    from carddues.ingest import IngestSummary
+    from mydues import ingest as ingest_mod
+    from mydues.ingest import IngestSummary
 
     monkeypatch.setattr(gmail, "is_connected", lambda: True)
     captured: dict = {}

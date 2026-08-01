@@ -4,9 +4,9 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import db, expense_ingest
-from carddues.models import SOURCE_GMAIL, SOURCE_MANUAL, Expense
-from carddues.web.app import create_app
+from mydues import db, expense_ingest
+from mydues.models import SOURCE_GMAIL, SOURCE_MANUAL, Expense
+from mydues.web.app import create_app
 
 
 @pytest.fixture
@@ -309,8 +309,8 @@ def test_parse_unknown_subject_with_body_spend_cues():
 
 
 def test_refresh_expense_from_gmail_updates_bad_description(conn, monkeypatch):
-    from carddues import gmail
-    from carddues.models import CATEGORY_USER
+    from mydues import gmail
+    from mydues.models import CATEGORY_USER
 
     expense_id = db.add_expense(
         conn,
@@ -364,7 +364,7 @@ def test_refresh_expense_from_gmail_updates_bad_description(conn, monkeypatch):
 
 
 def test_expenses_tab_shows_refresh_affordance(client, monkeypatch):
-    from carddues import gmail
+    from mydues import gmail
 
     monkeypatch.setattr(gmail, "is_connected", lambda: True)
     page = client.get("/?tab=expenses").get_data(as_text=True)
@@ -376,7 +376,7 @@ def test_expenses_tab_shows_refresh_affordance(client, monkeypatch):
 
 
 def test_parse_lookback_days_defaults_and_clamps():
-    from carddues.web.app import _parse_lookback_days, _parse_lookback_months
+    from mydues.web.app import _parse_lookback_days, _parse_lookback_months
 
     assert _parse_lookback_days(None) == 7
     assert _parse_lookback_days("") == 7
@@ -455,7 +455,7 @@ def test_edit_and_delete_expense(client, conn):
 
 
 def test_show_email_loads_gmail_message(client, conn, monkeypatch):
-    from carddues import gmail
+    from mydues import gmail
 
     expense_id = db.add_expense(
         conn,

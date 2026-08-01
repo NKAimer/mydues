@@ -2,20 +2,20 @@
 <!--
   Daily refresh: fetch statements from Gmail, then notify if anything is due.
   Replace REPLACE_WITH_PROJECT_PATH, then:
-      cp scripts/com.carddues.refresh.plist ~/Library/LaunchAgents/
-      launchctl load ~/Library/LaunchAgents/com.carddues.refresh.plist
+      cp scripts/com.mydues.refresh.plist ~/Library/LaunchAgents/
+      launchctl load ~/Library/LaunchAgents/com.mydues.refresh.plist
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.carddues.refresh</string>
+    <string>com.mydues.refresh</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/bin/sh</string>
         <string>-c</string>
-        <string>REPLACE_WITH_PROJECT_PATH/.venv/bin/python -m carddues ingest &amp;&amp; REPLACE_WITH_PROJECT_PATH/.venv/bin/python -m carddues notify</string>
+        <string>REPLACE_WITH_PROJECT_PATH/.venv/bin/python -m mydues ingest &amp;&amp; REPLACE_WITH_PROJECT_PATH/.venv/bin/python -m mydues notify</string>
     </array>
 
     <key>StartCalendarInterval</key>
@@ -27,8 +27,8 @@
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/tmp/carddues-refresh.log</string>
+    <string>/tmp/mydues-refresh.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/carddues-refresh.err</string>
+    <string>/tmp/mydues-refresh.err</string>
 </dict>
 </plist>

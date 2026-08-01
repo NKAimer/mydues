@@ -4,8 +4,8 @@ from datetime import date, datetime
 
 import pytest
 
-from carddues import audit, db, dues, ingest, parse_quality
-from carddues.models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
+from mydues import audit, db, dues, ingest, parse_quality
+from mydues.models import SOURCE_STATEMENT, Card, ParsedStatement, StatementRecord
 
 
 def test_assess_flags_missing_due_and_empty_txns():

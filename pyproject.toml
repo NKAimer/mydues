@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "card-dues"
+name = "mydues"
 version = "0.1.0"
 description = "Track Indian credit card dues from statement emails"
 requires-python = ">=3.11"
@@ -22,10 +22,10 @@ dependencies = [
 dev = ["pytest>=8.4"]
 
 [project.scripts]
-carddues = "carddues.cli:main"
+mydues = "mydues.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["carddues*"]
+include = ["mydues*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

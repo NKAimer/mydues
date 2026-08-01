@@ -4,9 +4,9 @@ from datetime import date
 
 import pytest
 
-from carddues import config, db, gmail, ingest
-from carddues.models import Card
-from carddues.web.app import create_app
+from mydues import config, db, gmail, ingest
+from mydues.models import Card
+from mydues.web.app import create_app
 
 from .fixtures import write_pdf
 
@@ -44,7 +44,7 @@ def test_the_stated_rule_opens_a_statement_guessing_cannot(conn, card, tmp_path)
     path = tmp_path / "statement.pdf"
     write_pdf(path, password=STATED_PASSWORD)
 
-    from carddues import passwords
+    from mydues import passwords
 
     assert STATED_PASSWORD not in passwords.candidates_for(card)
 
@@ -162,7 +162,7 @@ def test_the_dashboard_offers_an_unlock_box_for_locked_attachments(client, conn,
 
 
 def test_a_locally_imported_file_gets_no_unlock_box(client, conn, card):
-    """There is no mail to re-fetch, so `carddues import --password` is the way."""
+    """There is no mail to re-fetch, so `mydues import --password` is the way."""
     db.log_ingest(
         conn,
         message_id=None,

@@ -5,8 +5,8 @@ from datetime import date
 
 import pytest
 
-from carddues import gmail, passwords
-from carddues.models import Card
+from mydues import gmail, passwords
+from mydues.models import Card
 
 
 def make_card(**overrides) -> Card:
