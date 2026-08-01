@@ -173,6 +173,19 @@ def _month_window(month_start: date) -> tuple[date, date]:
     return start, end
 
 
+def _card_billing_window(month_start: date) -> tuple[date, date]:
+    """Statement dates for a labeled month: 10th of month through 9th of next.
+
+    Half-open [start, end): e.g. July → [10 Jul, 10 Aug).
+    """
+    start = month_start.replace(day=10)
+    if month_start.month == 12:
+        end = date(month_start.year + 1, 1, 10)
+    else:
+        end = date(month_start.year, month_start.month + 1, 10)
+    return start, end
+
+
 def _shift_month(month_start: date, delta: int) -> date:
     year = month_start.year
     month = month_start.month + delta
@@ -251,16 +264,17 @@ def create_app() -> Flask:
 
         month_start = _parse_month(request.args.get("month"))
         month_end_exclusive = _month_window(month_start)[1]
+        card_start, card_end = _card_billing_window(month_start)
         expenses = db.list_expenses(conn, start=month_start, end=month_end_exclusive)
         expense_total = db.expense_total(conn, start=month_start, end=month_end_exclusive)
         card_month_txns = db.list_transactions_in_range(
-            conn, start=month_start, end=month_end_exclusive
+            conn, start=card_start, end=card_end
         )
         card_spend_total = db.card_spend_total(
-            conn, start=month_start, end=month_end_exclusive
+            conn, start=card_start, end=card_end
         )
         card_spend_by_card = db.card_spend_by_card(
-            conn, start=month_start, end=month_end_exclusive
+            conn, start=card_start, end=card_end
         )
 
         return render_template(

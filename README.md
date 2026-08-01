@@ -152,13 +152,18 @@ Three tabs:
 
 - Portfolio summary: total outstanding, minimum to pay, next due, utilisation
 - **Billed in Month** — sum of each statement's `total_due` whose
-  **`statement_date`** falls in that month (not calendar-day purchase debits).
-  Purchases on a July bill can have June `txn_date`s; those still belong to the
-  July billed total. Month navigation is Prev / Next.
+  **`statement_date`** falls in the **10th–9th window** for that month label
+  (e.g. July includes statements generated 10 Jul through 9 Aug inclusive; not
+  calendar-day purchase debits). Purchases on a July bill can have June
+  `txn_date`s; those still belong to the July billed total. Month navigation is
+  Prev / Next.
 - Per-card breakdown of that month's billed totals, plus category totals from
   the line items on those statements
 - Per card: latest statement (or an older cycle from **Statements**), payments,
-  manual override, unlock for locked PDFs, show transactions
+  manual override, unlock for locked PDFs, show transactions. Each card shows
+  **Statement total** (`total_due` for the cycle being viewed — latest by
+  default), not credit limit; credit limit remains editable in the set form and
+  still feeds the portfolio utilisation tile when known
 - **Fetch from Gmail** / **Re-parse statements** when connected
 
 ### Expenses
@@ -306,7 +311,7 @@ recorded, which is what older log rows look like.
 | Dashboard shows **Fetch from Gmail** but Connect never worked / old UI | Another process still owns port 8765 — see [RESTART.md](RESTART.md) |
 | Gmail fetch fails after ~7 days | OAuth consent still in **Testing** — reconnect, or publish to Production ([docs/gmail-oauth.md](docs/gmail-oauth.md)) |
 | Statements stay **locked** | Add `--name` / `--dob` (and last4) on the card, or unlock once on the dashboard / `carddues unlock` |
-| Wrong billed month total | Cards tab uses **`statement_date` + `total_due`**, not txn calendar days. A statement dated 22 Jul counts fully in July |
+| Wrong billed month total | Cards tab uses **`total_due`** for statements in the **10th–9th** window (e.g. July = 10 Jul–9 Aug), not txn calendar days |
 | Expenses empty after Fetch | Alerts need matching subjects and no PDF attachment; statements are excluded on purpose |
 | Parser missed dues / dates | `carddues set` for a manual override; `carddues audit` / `carddues reparse` after a parser fix |
 | Move all data | Set `CARDDUES_HOME` before any command; copy the old directory if migrating |
@@ -322,7 +327,7 @@ recorded, which is what older log rows look like.
 The suite covers the parsers against realistic statement layouts, real encrypted
 PDF unlocking, password rules read from real issuer wordings, transaction and
 category extraction, expenses ingest, the Cards-tab billed month totals
-(`total_due` by `statement_date`), the statement history picker, retrying a
+(`total_due` for the 10th–9th statement-date window), the statement history picker, retrying a
 backlog against a stubbed Gmail, the due-resolution rules, and the dashboard
 routes.
 

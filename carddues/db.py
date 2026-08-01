@@ -807,17 +807,37 @@ def card_spend_by_card(
     ]
 
 
+def _billing_month_key(statement_date: date) -> str:
+    """Map statement_date to the Cards-tab month label (10th–9th window).
+
+    Dates on/after the 10th belong to that calendar month; dates before the
+    10th belong to the previous month (e.g. 5 Aug → 2026-07).
+    """
+    if statement_date.day >= 10:
+        return f"{statement_date.year:04d}-{statement_date.month:02d}"
+    if statement_date.month == 1:
+        return f"{statement_date.year - 1:04d}-12"
+    return f"{statement_date.year:04d}-{statement_date.month - 1:02d}"
+
+
 def card_spend_months(conn: sqlite3.Connection) -> list[str]:
-    """YYYY-MM keys that have at least one dated statement, newest first."""
+    """YYYY-MM keys that have at least one dated statement, newest first.
+
+    Uses the 10th–9th billing window, not calendar month of statement_date.
+    """
     rows = conn.execute(
         """
-        SELECT DISTINCT strftime('%Y-%m', statement_date) AS month
+        SELECT DISTINCT statement_date
         FROM statements
         WHERE statement_date IS NOT NULL
-        ORDER BY month DESC
         """
     ).fetchall()
-    return [row["month"] for row in rows if row["month"]]
+    months: set[str] = set()
+    for row in rows:
+        statement_date = _as_date(row["statement_date"])
+        if statement_date is not None:
+            months.add(_billing_month_key(statement_date))
+    return sorted(months, reverse=True)
 
 
 def expense_months(conn: sqlite3.Connection) -> list[str]:

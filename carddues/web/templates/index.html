@@ -351,7 +351,7 @@
       <h2>{{ expense_month_label }}</h2>
       <a class="btn subtle" href="{{ url_for('index', tab='cards', month=expense_next_month) }}">Next →</a>
     </div>
-    <p class="sub">Billed statement totals for the month (by statement date), not purchase calendar days.</p>
+    <p class="sub">Billed statement totals for statements generated from the 10th of this month through the 9th of next month (not purchase calendar days).</p>
   </section>
 
   <section class="summary">
@@ -466,8 +466,8 @@
             <dd>{{ view.statement_date.strftime('%d %b %Y') if view.statement_date else '—' }}</dd>
           </div>
           <div>
-            <dt>Limit</dt>
-            <dd>{{ view.credit_limit | inr }}</dd>
+            <dt>Statement total</dt>
+            <dd>{{ view.billed_amount | inr }}</dd>
           </div>
         </dl>
 

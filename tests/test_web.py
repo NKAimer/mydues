@@ -39,7 +39,9 @@ def test_dashboard_renders_the_billed_amount_and_its_caveat(client, conn):
     page = client.get("/").get_data(as_text=True)
 
     assert "HDFC Infinia" in page
+    assert "Statement total" in page
     assert "45,231.50" in page
+    assert "<dt>Limit</dt>" not in page
     assert "billed statement amounts" in page
     assert "Due today" in page
 
