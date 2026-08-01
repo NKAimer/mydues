@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 
-# Strong negatives: if any match, this is not a credit-card statement.
-_NON_CARD_RE = re.compile(
+# Always reject: these documents are never a credit-card bill.
+_HARD_NON_CARD_RE = re.compile(
     r"(?i)\b(?:"
     r"demat(?:\s+account)?"
     r"|depository\s+participant"
@@ -21,11 +21,29 @@ _NON_CARD_RE = re.compile(
     r")\b"
 )
 
+# Title-only reject: real bills often link to MITC in footnotes; only skip when
+# the PDF itself opens as terms / key-fact material.
+_SOFT_TITLE_RE = re.compile(
+    r"(?i)\b(?:"
+    r"key\s+fact\s+statement"
+    r"|most\s+important\s+terms"
+    r"|important\s+terms\s+(?:and|&)\s+conditions"
+    r")\b"
+)
+_SOFT_TITLE_WINDOW = 900
+
+# Filenames that arrive with statement mail but are not the bill itself.
+_NON_STATEMENT_FILE_RE = re.compile(
+    r"(?i)(?:most\s+important\s+terms|terms\s*(?:&|and)\s*conditions|key\s+fact|"
+    r"mitc|schedule\s+of\s+charges)"
+)
+
 # At least one of these appears on every issuer layout we support.
 _CARD_EVIDENCE = (
     "credit card",
     "minimum amount due",
     "minimum payment due",
+    "minimal payment due",
     "min amount due",
     "payment due date",
     "total amount due",
@@ -43,11 +61,18 @@ GMAIL_SUBJECT_EXCLUSIONS = (
 )
 
 
+def _normalize_filename(filename: str) -> str:
+    return re.sub(r"[_\s]+", " ", filename or "")
+
+
 def looks_like_credit_card_statement(text: str) -> bool:
     """True when `text` looks like a credit-card bill, not another bank PDF."""
     if not (text or "").strip():
         return False
-    if _NON_CARD_RE.search(text):
+    if _HARD_NON_CARD_RE.search(text):
+        return False
+    head = text[:_SOFT_TITLE_WINDOW]
+    if _SOFT_TITLE_RE.search(head):
         return False
     lowered = text.lower()
     return any(marker in lowered for marker in _CARD_EVIDENCE)
@@ -55,7 +80,14 @@ def looks_like_credit_card_statement(text: str) -> bool:
 
 def is_credit_card_mail(*, subject: str = "", filename: str = "") -> bool:
     """False for covering emails / filenames that are clearly not card bills."""
-    blob = f"{subject}\n{filename}"
+    normalized_name = _normalize_filename(filename)
+    if normalized_name and _NON_STATEMENT_FILE_RE.search(normalized_name):
+        return False
+    blob = f"{subject}\n{normalized_name}"
     if not blob.strip():
         return True
-    return _NON_CARD_RE.search(blob) is None
+    if _HARD_NON_CARD_RE.search(blob):
+        return False
+    if _SOFT_TITLE_RE.search(blob):
+        return False
+    return True

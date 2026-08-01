@@ -29,16 +29,42 @@ def test_store_registers_an_unknown_card(conn):
     assert "45231.50" in detail
 
 
-def test_store_matches_an_existing_card(conn):
-    card = Card(issuer="hdfc", label="My Infinia", last4="8765")
-    card.id = db.add_card(conn, card)
+def test_store_matches_sbi_partial_tail_to_registered_card(conn):
+    phonepe = Card(issuer="sbicard", label="SBI Phonepe ••3418", last4="3418")
+    phonepe.id = db.add_card(conn, phonepe)
+    cashback = Card(issuer="sbicard", label="SBI Cashback ••9326", last4="9326")
+    cashback.id = db.add_card(conn, cashback)
 
-    _, _, card_id = ingest.store(conn, STATEMENT, source_ref="msg-1")
+    statement = ParsedStatement(
+        total_due=4512.0,
+        min_due=225.0,
+        due_date=date(2026, 8, 13),
+        statement_date=date(2026, 7, 24),
+        issuer="sbicard",
+        parser="sbicard",
+        card_tail="18",
+    )
+    status, detail, card_id = ingest.store(conn, statement, source_ref="msg-phonepe")
 
-    assert card_id == card.id
-    assert len(db.list_cards(conn)) == 1
-    view = dues.view_for_card(conn, card, today=date(2026, 7, 20))
-    assert view.billed_amount == pytest.approx(45231.50)
+    assert status == ingest.STATUS_PARSED
+    assert card_id == phonepe.id
+    assert "Phonepe" in detail or "3418" in detail
+
+
+def test_store_does_not_guess_when_partial_tail_matches_two_cards(conn):
+    db.add_card(conn, Card(issuer="sbicard", label="A ••3418", last4="3418"))
+    db.add_card(conn, Card(issuer="sbicard", label="B ••5518", last4="5518"))
+
+    statement = ParsedStatement(
+        total_due=100.0,
+        issuer="sbicard",
+        parser="sbicard",
+        card_tail="18",
+    )
+    status, _, card_id = ingest.store(conn, statement, source_ref="msg-ambig")
+
+    assert status == ingest.STATUS_UNPARSED
+    assert card_id is None
 
 
 def test_reingesting_the_same_statement_does_not_duplicate(conn):

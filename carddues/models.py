@@ -73,6 +73,9 @@ class ParsedStatement:
     credit_limit: float | None = None
     available_credit: float | None = None
     last4: str | None = None
+    # Trailing digits visible on partial masks (e.g. XX18); used to match a card
+    # when the full last4 is not printed.
+    card_tail: str | None = None
     issuer: str | None = None
     parser: str | None = None
     matched_labels: dict[str, str] = field(default_factory=dict)

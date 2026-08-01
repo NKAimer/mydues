@@ -117,13 +117,19 @@ class HsbcParser(StatementParser):
     key = "hsbc"
     issuer_key = "hsbc"
     labels = _labels(
-        total_due=("Total Dues", "Total Amount Due", "Total Amount Payable"),
-        min_due=("Minimum Amount Due", "Minimum Payment Due"),
+        total_due=("Total Payment Due", "Total Dues", "Total Amount Due"),
+        min_due=("Minimal Payment Due", "Minimum Amount Due", "Minimum Payment Due"),
         due_date=("Payment Due Date",),
         statement_date=("Statement Date", "Statement Period"),
         credit_limit=("Credit Limit", "Your Credit Limit"),
-        available_credit=("Available Credit", "Available Credit Limit"),
+        available_credit=("Available Credit Limit", "Available Credit"),
     )
+
+
+# Ledger "Net Outstanding" is not the bill; never treat it as total due.
+HsbcParser.labels["total_due"] = tuple(
+    label for label in HsbcParser.labels["total_due"] if label != "Net Outstanding"
+)
 
 
 class IndusIndParser(StatementParser):

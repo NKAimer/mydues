@@ -44,6 +44,20 @@ def test_demat_mail_subject_is_skipped():
     )
 
 
+def test_hsbc_terms_pdf_is_rejected():
+    assert not looks_like_credit_card_statement(fixtures.HSBC_MITC)
+    assert not is_credit_card_mail(filename="Most Important Terms and Conditions.pdf")
+    assert not is_credit_card_mail(filename="Most_Important_Terms___Conditions.pdf")
+    assert not is_credit_card_mail(filename="Key Fact Statement.pdf")
+    assert is_credit_card_mail(filename="20260722.pdf")
+
+
+def test_sbi_bill_with_mitc_footnote_still_counts_as_a_statement():
+    """SBI appends MITC links; that must not veto the bill on page one."""
+    assert looks_like_credit_card_statement(fixtures.SBICARD_PARTIAL_TAIL)
+    assert parse(fixtures.SBICARD_PARTIAL_TAIL, issuer_hint="sbicard") is not None
+
+
 def test_yes_bank_sender_domain_is_registered():
     from carddues import issuers
 

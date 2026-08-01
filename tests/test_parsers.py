@@ -140,6 +140,37 @@ def test_hsbc_inline_layout():
     assert result.last4 == "4200"
 
 
+def test_hsbc_live_prefers_total_payment_due_over_net_outstanding():
+    from carddues.text import find_card_last4
+
+    raw = fixtures.HSBC_LIVE_JULY
+    assert find_card_last4(raw) == "7672"
+    result = parse(raw, issuer_hint="hsbc")
+
+    assert result is not None
+    assert result.issuer == "hsbc"
+    assert result.last4 == "7672"
+    assert result.total_due == pytest.approx(20252.96)
+    assert result.min_due == pytest.approx(202.53)
+    assert result.statement_date == date(2026, 7, 22)
+    assert result.due_date == date(2026, 8, 11)
+    assert result.total_due != pytest.approx(17367.28)
+
+
+def test_sbi_partial_tail_is_exposed_for_card_matching():
+    from carddues.text import find_card_last4, find_card_tail
+
+    raw = fixtures.SBICARD_PARTIAL_TAIL
+    assert find_card_last4(raw) is None
+    assert find_card_tail(raw) == "18"
+    result = parse(raw, issuer_hint="sbicard")
+
+    assert result is not None
+    assert result.last4 is None
+    assert result.card_tail == "18"
+    assert result.total_due == pytest.approx(4512.00)
+
+
 def test_credit_balance_is_negative():
     result = parse(fixtures.CREDIT_BALANCE)
     assert result.issuer == "kotak"

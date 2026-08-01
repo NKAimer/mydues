@@ -232,6 +232,21 @@ def purge_false_card(conn: sqlite3.Connection, *, issuer: str, last4: str) -> bo
     return True
 
 
+def delete_statements_for_source_ref(conn: sqlite3.Connection, source_ref: str) -> int:
+    """Remove statement rows (and their transactions) for one mail attachment."""
+    rows = conn.execute(
+        "SELECT id FROM statements WHERE source_ref = ?", (source_ref,)
+    ).fetchall()
+    if not rows:
+        return 0
+    ids = [row["id"] for row in rows]
+    placeholders = ",".join("?" * len(ids))
+    conn.execute(f"DELETE FROM transactions WHERE statement_id IN ({placeholders})", ids)
+    conn.execute("DELETE FROM statements WHERE source_ref = ?", (source_ref,))
+    conn.commit()
+    return len(ids)
+
+
 def retarget_card_last4(
     conn: sqlite3.Connection,
     *,

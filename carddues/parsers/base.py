@@ -18,6 +18,7 @@ from ..text import (
     AMOUNT_RE,
     DATE_RE,
     find_card_last4,
+    find_card_tail,
     parse_amount,
     parse_amounts,
     parse_date,
@@ -51,6 +52,7 @@ DEFAULT_LABELS: dict[str, tuple[str, ...]] = {
     "min_due": (
         "Minimum Amount Due",
         "Minimum Payment Due",
+        "Minimal Payment Due",
         "Minimum Amount Payable",
         "Min Amount Due",
         "Minimum Due",
@@ -180,11 +182,18 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
     columns we have no label for.
     """
     ordered = sorted(hits, key=lambda hit: hit.column)
-
-    if len(ordered) == len(tokens):
-        if all(FIELD_KIND[hit.field] == token.kind for hit, token in zip(ordered, tokens)):
-            return {hit.field: (token.value, hit.label) for hit, token in zip(ordered, tokens)}
-        return {}
+    period_hits = [
+        hit
+        for hit in ordered
+        if hit.field == "statement_date" and _is_period_label(hit.label)
+    ]
+    # Statement Period rows print start + end; never zip 1:1 onto the start date.
+    if (
+        not period_hits
+        and len(ordered) == len(tokens)
+        and all(FIELD_KIND[hit.field] == token.kind for hit, token in zip(ordered, tokens))
+    ):
+        return {hit.field: (token.value, hit.label) for hit, token in zip(ordered, tokens)}
 
     if len(tokens) < len(ordered):
         return {}
@@ -202,6 +211,22 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
         ]
         if not candidates:
             continue
+        # Statement Period rows carry start + end; the bill date is the end.
+        if hit.field == "statement_date" and _is_period_label(hit.label):
+            date_tokens = [
+                (index, token)
+                for index, token in enumerate(tokens)
+                if index not in used
+                and token.kind == DATE
+                and token.column > last_column
+            ]
+            if len(date_tokens) >= 2:
+                used.add(date_tokens[0][0])
+                index, token = date_tokens[1]
+                used.add(index)
+                last_column = token.column
+                result[hit.field] = (token.value, hit.label)
+                continue
         index, token = min(candidates, key=lambda item: abs(item[1].column - hit.column))
         used.add(index)
         last_column = token.column
@@ -282,6 +307,14 @@ def _extract_inline(
     return found
 
 
+def _label_rank(labels: dict[str, tuple[str, ...]], field: str, label: str) -> int:
+    preferred = labels.get(field, ())
+    try:
+        return preferred.index(label)
+    except ValueError:
+        return len(preferred) + 1
+
+
 def extract_fields(
     text: str, labels: dict[str, tuple[str, ...]] | None = None
 ) -> dict[str, tuple[object, str]]:
@@ -304,6 +337,13 @@ def extract_fields(
             field == "statement_date"
             and _is_period_label(existing[1])
             and not _is_period_label(result[1])
+        ):
+            values[field] = result
+            continue
+        # Prefer earlier wording in the issuer label list (Total Payment Due
+        # over a later Net Outstanding hit).
+        if _label_rank(label_map, field, result[1]) < _label_rank(
+            label_map, field, existing[1]
         ):
             values[field] = result
     return values
@@ -337,6 +377,7 @@ class StatementParser:
             credit_limit=self._amount(values, "credit_limit"),
             available_credit=self._amount(values, "available_credit"),
             last4=find_card_last4(text),
+            card_tail=find_card_tail(text),
             issuer=self.issuer_key or issuers.detect(text),
             parser=self.key,
             matched_labels={field: label for field, (_, label) in values.items()},

@@ -66,6 +66,17 @@ def _resolve_card(
         if found:
             return found
 
+    # SBI often prints XX18 instead of 3418; match a unique same-issuer ending.
+    tail = statement.card_tail or statement.last4
+    if tail and statement.issuer:
+        matches = [
+            card
+            for card in cards
+            if card.issuer == statement.issuer and card.last4.endswith(tail)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+
     if not statement.last4:
         # Without card digits, only an unambiguous single card for the issuer works.
         same_issuer = [c for c in cards if statement.issuer and c.issuer == statement.issuer]
@@ -407,8 +418,13 @@ def _log_reparse(
 
     A failed rewrite must stay in the reparse queue; overwriting status with
     error/locked would leave the bad statement row and never try again.
+    Non-card PDFs (T&Cs) are demoted to skipped and their junk rows removed.
     """
     if result.status == STATUS_PARSED:
+        _log(conn, message_id=message_id, filename=filename, result=result, message=message)
+        return
+    if result.status == STATUS_SKIPPED and message_id:
+        db.delete_statements_for_source_ref(conn, message_id)
         _log(conn, message_id=message_id, filename=filename, result=result, message=message)
         return
     detail = f"Reparse {result.status}: {result.detail}"

@@ -261,6 +261,45 @@ Credit Limit 2,50,000.00
 Available Credit 2,31,550.00
 """
 
+# Live Jul-2026 layout: Net Outstanding must not beat Total Payment Due;
+# Minimal payment due; period end is the bill date; 43xx…7672 last4.
+HSBC_LIVE_JULY = """
+HSBC LIVE+ CREDIT CARD Statement
+MR NAVEEN KUMAR
+43xx xxxx xxxx 7672
+
+Statement Period Payment Due Date
+23 Jun 2026 22 Jul 2026 11 Aug 2026
+
+Total Payment Due Minimal Payment Due
+20,252.96 202.53
+
+Net Outstanding balance
+17,367.28
+
+Credit Limit Available Credit Limit
+2,15,000.00 1,94,747.04
+"""
+
+HSBC_MITC = """
+Most Important Terms and Conditions
+HSBC Credit Card
+Credit Limit 5
+Payment Due Date 13 Dec 1300
+Total Amount Due 21,500.00
+Minimum Amount Due 1,000.00
+"""
+
+# SBI PhonePe / Cashback often print only the last two digits.
+SBICARD_PARTIAL_TAIL = """
+SBI Card Statement
+XXXX XXXX XXXX XX18
+Statement Date: 24 Jul 2026
+Total Amount Due Minimum Amount Due Payment Due Date
+INR 4,512.00 INR 225.00 13 Aug 2026
+Credit Limit: INR 1,50,000.00
+"""
+
 CREDIT_BALANCE = """
 Kotak Mahindra Bank Credit Card Statement
 Statement Date: 01-07-2026

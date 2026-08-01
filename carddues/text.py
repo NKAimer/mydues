@@ -196,16 +196,22 @@ def find_labeled_date(
     return None
 
 
-# Grouped masks (4321 XXXX XXXX 8765) and compact ones (652926XXXXXX2750 /
-# 4315XXXXXXXX4019). At least one masked run is required so bare account
-# numbers are not treated as cards.
+# Grouped masks (4321 XXXX XXXX 8765), compact (652926XXXXXX2750),
+# HSBC-style (43xx xxxx xxxx 7672), and SBI partial tails (XXXX XXXX XXXX XX18).
 _CARD_GROUPED_RE = re.compile(
-    r"(?<!\d)(?:\d{4}|[Xx*]{4})[\s-]*[Xx*]{4}[\s-]*(?:[Xx*]{4}|\d{4})[\s-]*(\d{4})(?!\d)"
+    r"(?<!\d)(?:\d{4}|[Xx*]{4}|\d{2}[Xx*]{2})[\s-]*"
+    r"[Xx*]{4}[\s-]*"
+    r"(?:[Xx*]{4}|\d{4})[\s-]*"
+    r"(\d{4})(?!\d)"
 )
 _CARD_COMPACT_RE = re.compile(r"(?<!\d)\d{4,6}[Xx*]{4,8}(\d{4})(?!\d)")
 _CARD_LABELED_RE = re.compile(
-    r"(?i)(?:credit\s*card\s*no\.?|card\s*(?:no\.?|number))\s*[:.]?\s*"
-    r"([0-9Xx*]{12,22})"
+    r"(?i)(?:credit\s*card\s*no\.?|card\s*(?:no\.?|number)|primary\s+card\s+number)"
+    r"\s*[:.]?\s*([0-9Xx* ]{12,30})"
+)
+# SBI often prints only the last two digits: XXXX XXXX XXXX XX18
+_CARD_PARTIAL_TAIL_RE = re.compile(
+    r"(?<!\d)(?:[Xx*]{4}[\s-]*){3}[Xx*]{2}(\d{2})(?!\d)"
 )
 _ALTERNATE_ACCOUNT_RE = re.compile(
     r"(?i)alternate\s+(?:account|a/?c)\s*(?:number|no\.?)?\s*:?\s*\d+"
@@ -232,3 +238,17 @@ def find_card_last4(text: str) -> str | None:
         if match:
             return match.group(1)
     return None
+
+
+def find_card_tail(text: str) -> str | None:
+    """Visible trailing card digits when the PDF only prints a partial mask.
+
+    SBI Cashback / PhonePe often show `XXXX XXXX XXXX XX18` — two digits that
+    still uniquely identify a registered card ending in 18.
+    """
+    full = find_card_last4(text)
+    if full:
+        return full
+    cleaned = _ALTERNATE_ACCOUNT_RE.sub(" ", text or "")
+    match = _CARD_PARTIAL_TAIL_RE.search(cleaned)
+    return match.group(1) if match else None
