@@ -29,6 +29,7 @@ def test_real_issuer_fixtures_still_look_like_card_bills():
         fixtures.ICICI_INLINE,
         fixtures.SBICARD_CASHBACK_HEADER,
         fixtures.AXIS_INLINE,
+        fixtures.AXIS_PAYMENT_SUMMARY,
         fixtures.AMEX_INLINE,
     ):
         assert looks_like_credit_card_statement(raw)

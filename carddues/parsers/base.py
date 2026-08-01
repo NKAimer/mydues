@@ -128,13 +128,17 @@ def _collect_hits(text: str, labels: dict[str, tuple[str, ...]]) -> list[LabelHi
     """Every label occurrence, with nested and overlapping ones removed.
 
     Dropping contained spans is what stops "Credit Limit" from matching inside
-    "Available Credit Limit".
+    "Available Credit Limit". Labels glued to a leading "=" (Axis reconciliation
+    formulae like "=Total Payment Due") are ignored — they annotate a formula,
+    they are not field headers.
     """
     bounds = _line_bounds(text)
     raw: list[tuple[str, str, int, int]] = []
     for field, field_labels in labels.items():
         for label in field_labels:
             for match in _label_regex(label).finditer(text):
+                if match.start() > 0 and text[match.start() - 1] == "=":
+                    continue
                 raw.append((field, label, match.start(), match.end()))
 
     raw.sort(key=lambda item: (item[2], -(item[3] - item[2])))
@@ -180,6 +184,11 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
     Equal counts pair up in order. Otherwise each label takes the closest
     unused token of the right kind, which handles value rows that carry extra
     columns we have no label for.
+
+    When a Statement Period column is present (start + end dates), leftover
+    date labels such as Payment Due Date and Statement Generation Date are
+    zipped onto the leftover date tokens in order. Closest-column matching
+    mis-fires on Axis rows where the value columns sit denser than the labels.
     """
     ordered = sorted(hits, key=lambda hit: hit.column)
     period_hits = [
@@ -201,7 +210,16 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
     result: dict[str, tuple[object, str]] = {}
     used: set[int] = set()
     last_column = -1
+    deferred_dates: list[LabelHit] = []
     for hit in ordered:
+        # Defer non-period dates until after period consumes start + end.
+        if (
+            period_hits
+            and FIELD_KIND[hit.field] == DATE
+            and not (hit.field == "statement_date" and _is_period_label(hit.label))
+        ):
+            deferred_dates.append(hit)
+            continue
         candidates = [
             (index, token)
             for index, token in enumerate(tokens)
@@ -231,6 +249,31 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
         used.add(index)
         last_column = token.column
         result[hit.field] = (token.value, hit.label)
+
+    if deferred_dates:
+        remaining_dates = [
+            (index, token)
+            for index, token in enumerate(tokens)
+            if index not in used and token.kind == DATE
+        ]
+        if len(remaining_dates) >= len(deferred_dates):
+            for hit, (index, token) in zip(deferred_dates, remaining_dates):
+                used.add(index)
+                result[hit.field] = (token.value, hit.label)
+        else:
+            for hit in deferred_dates:
+                candidates = [
+                    (index, token)
+                    for index, token in remaining_dates
+                    if index not in used
+                ]
+                if not candidates:
+                    break
+                index, token = min(
+                    candidates, key=lambda item: abs(item[1].column - hit.column)
+                )
+                used.add(index)
+                result[hit.field] = (token.value, hit.label)
     return result
 
 
@@ -341,8 +384,10 @@ def extract_fields(
             values[field] = result
             continue
         # Prefer earlier wording in the issuer label list (Total Payment Due
-        # over a later Net Outstanding hit).
-        if _label_rank(label_map, field, result[1]) < _label_rank(
+        # over a later Net Outstanding hit). Table values win ties: Axis and
+        # similar layouts put the real figures under a multi-label header, while
+        # later inline hits are often formula lines or T&C examples.
+        if _label_rank(label_map, field, result[1]) <= _label_rank(
             label_map, field, existing[1]
         ):
             values[field] = result

@@ -75,7 +75,13 @@ class AxisParser(StatementParser):
         total_due=("Total Payment Due", "Total Amount Due"),
         min_due=("Minimum Payment Due", "Minimum Amount Due"),
         due_date=("Payment Due Date",),
-        statement_date=("Statement Date", "Statement Period"),
+        # Generation Date is the bill date on Axis Flipkart/Airtel/Ace PDFs;
+        # Statement Period is only the billing window (start–end).
+        statement_date=(
+            "Statement Generation Date",
+            "Statement Date",
+            "Statement Period",
+        ),
     )
 
 

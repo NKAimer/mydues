@@ -120,6 +120,52 @@ def test_axis_value_on_following_line():
     assert result.due_date == date(2026, 8, 3)
 
 
+def test_axis_payment_summary_table_not_formula_or_tnc():
+    """Flipkart/Airtel/Ace Axis PDFs: header totals beat =Total Payment Due and T&Cs."""
+    from carddues.text import find_card_last4
+
+    raw = fixtures.AXIS_PAYMENT_SUMMARY
+    assert find_card_last4(raw) == "0406"
+    result = parse(raw, issuer_hint="axis")
+
+    assert result is not None
+    assert result.issuer == "axis"
+    assert result.last4 == "0406"
+    assert result.total_due == pytest.approx(554.00)
+    assert result.min_due == pytest.approx(100.00)
+    assert result.due_date == date(2025, 11, 4)
+    assert result.statement_date == date(2025, 10, 15)
+    assert result.matched_labels.get("statement_date") == "Statement Generation Date"
+    # Previous balance / T&C sample figures must not win.
+    assert result.total_due != pytest.approx(48.00)
+    assert result.total_due != pytest.approx(8813.65)
+    assert result.min_due != pytest.approx(3.75)
+    assert result.min_due != pytest.approx(1953.65)
+
+
+def test_axis_ace_payment_summary():
+    result = parse(fixtures.AXIS_ACE_PAYMENT_SUMMARY, issuer_hint="axis")
+
+    assert result is not None
+    assert result.last4 == "0478"
+    assert result.total_due == pytest.approx(16009.00)
+    assert result.min_due == pytest.approx(321.00)
+    assert result.due_date == date(2025, 11, 4)
+    assert result.statement_date == date(2025, 10, 15)
+    assert result.total_due != pytest.approx(52.00)
+
+
+def test_axis_credit_balance_is_negative():
+    result = parse(fixtures.AXIS_CREDIT_BALANCE, issuer_hint="axis")
+
+    assert result is not None
+    assert result.last4 == "0083"
+    assert result.total_due == pytest.approx(-154.00)
+    assert result.min_due == pytest.approx(0.00)
+    assert result.due_date == date(2026, 6, 1)
+    assert result.statement_date == date(2026, 5, 12)
+
+
 def test_amex_new_balance_wording():
     result = parse(fixtures.AMEX_INLINE)
     assert result.issuer == "amex"

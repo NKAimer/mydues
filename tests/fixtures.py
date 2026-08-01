@@ -236,6 +236,63 @@ Payment Due Date
 Card No: XXXX XXXX XXXX 7788
 """
 
+# Real Flipkart Axis layout from pdfplumber: a PAYMENT SUMMARY header row, then
+# values with Dr/Cr. The reconciliation formula also contains "=Total Payment
+# Due" above the previous-balance line — that must not steal the total.
+AXIS_PAYMENT_SUMMARY = """
+Flipkart Axis Bank VISA Credit Card Statement
+NAVEEN KUMAR
+PAYMENT SUMMARY
+Total Payment Due Minimum Payment Due Statement Period Payment Due Date Statement Generation Date
+554.00 Dr 100.00 Dr 17/09/2025 - 15/10/2025 04/11/2025 15/10/2025
+Credit Card Number Credit Limit Available Credit Limit Available Cash Limit
+For hassle free payments register for
+440006******0406 402,000.00 401,446.00 120,600.00 Auto-Debit facility on 18605005555
+Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Charges =Total Payment Due Making only the minimum payment every
+month would result in the repayment stretching
+48.00 Cr 0.00 418.00 1,020.00 0.00 0.00 554.00 Dr over years with consequent interest payment
+Account Summary
+Card No: 440006******0406 Name NAVEEN KUMAR
+25/09/2025 FLIPKART PAYMENTS,BANGALORE MISC STORE 225.00 Dr
+**** End of Statement ****
+Minimum Amount Due (MAD) by the due
+Interest on Rs. 10,000 @ 3.75% p.m. from 11th July to 20th July
+Total Amount Due 8813.65
+Minimum Amount Due 1953.65
+"""
+
+# Ace card: larger total; same header shape; last4 0478.
+AXIS_ACE_PAYMENT_SUMMARY = """
+Axis Bank ACE Credit Card Statement
+PAYMENT SUMMARY
+Total Payment Due Minimum Payment Due Statement Period Payment Due Date Statement Generation Date
+16,009.00 Dr 321.00 Dr 17/09/2025 - 15/10/2025 04/11/2025 15/10/2025
+Credit Card Number Credit Limit Available Credit Limit Available Cash Limit
+For hassle free payments register for
+470011******0478 402,000.00 381,861.04 120,600.00 Auto-Debit facility on 18605005555
+Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Charges =Total Payment Due Making only the minimum payment every
+month would result in the repayment stretching
+52.00 Cr 0.00 0.00 16,061.00 0.00 0.00 16,009.00 Dr over years with consequent interest payment
+Card No: 470011******0478 Name NAVEEN KUMAR
+**** End of Statement ****
+"""
+
+# Credit balance statements print Cr on the payment summary amounts.
+AXIS_CREDIT_BALANCE = """
+Airtel Axis Bank Mastercard Credit Card Statement
+PAYMENT SUMMARY
+Total Payment Due Minimum Payment Due Statement Period Payment Due Date Statement Generation Date
+154.00 Cr 0.00 Cr 14/04/2026 - 12/05/2026 01/06/2026 12/05/2026
+Credit Card Number Credit Limit Available Credit Limit Available Cash Limit
+For hassle free payments register for
+539494******0083 402,000.00 402,000.00 120,600.00 Auto-Debit facility on 18605005555
+Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Charges =Total Payment Due Making only the minimum payment every
+month would result in the repayment stretching
+310.00 Dr 0.00 0.00 0.00 0.00 0.00 154.00 Cr over years with consequent interest payment
+Card No: 539494******0083 Name NAVEEN KUMAR
+**** End of Statement ****
+"""
+
 AMEX_INLINE = """
 American Express
 Prepared for NAVEEN KUMAR

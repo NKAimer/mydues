@@ -96,6 +96,41 @@ def test_store_replaces_prior_cycle_when_statement_date_changes(conn):
     assert rows[0].due_date == date(2026, 8, 15)
 
 
+def test_store_moves_statement_off_the_wrong_card_for_same_attachment(conn):
+    """Axis bills once fell onto the only registered card; reparse must migrate."""
+    wrong = Card(issuer="axis", label="Axis Bank ••0406", last4="0406")
+    wrong.id = db.add_card(conn, wrong)
+    right = Card(issuer="axis", label="Axis Bank ••0083", last4="0083")
+    right.id = db.add_card(conn, right)
+
+    misfiled = ParsedStatement(
+        total_due=217.0,
+        min_due=10000.0,
+        statement_date=date(2025, 10, 12),
+        last4="0406",
+        issuer="axis",
+        parser="axis",
+    )
+    ingest.store(conn, misfiled, source_ref="msg-axis")
+
+    corrected = ParsedStatement(
+        total_due=3692.91,
+        min_due=100.0,
+        due_date=date(2025, 11, 1),
+        statement_date=date(2025, 10, 12),
+        last4="0083",
+        issuer="axis",
+        parser="axis",
+    )
+    ingest.store(conn, corrected, source_ref="msg-axis")
+
+    assert db.statements_for_card(conn, wrong.id) == []
+    rows = db.statements_for_card(conn, right.id)
+    assert len(rows) == 1
+    assert rows[0].total_due == pytest.approx(3692.91)
+    assert rows[0].min_due == pytest.approx(100.0)
+
+
 def test_retarget_card_last4_renames_a_misread_card(conn):
     card = Card(issuer="hdfc", label="HDFC Bank ••0722", last4="0722")
     card.id = db.add_card(conn, card)

@@ -310,13 +310,14 @@ def save_statement(conn: sqlite3.Connection, record: StatementRecord) -> int:
     that updates an existing cycle leaves no reliable last row id behind.
 
     When `source_ref` is set (a Gmail message id), any prior row for that
-    attachment is removed first. Correcting a mis-read statement_date must
-    rewrite the cycle, not leave the bad dates beside the new ones.
+    attachment is removed first — across every card. Correcting a mis-read
+    statement_date or last4 must rewrite the cycle, not leave the bad row on
+    the wrong card beside the new one.
     """
     if record.source_ref:
         conn.execute(
-            "DELETE FROM statements WHERE card_id = ? AND source = ? AND source_ref = ?",
-            (record.card_id, record.source, record.source_ref),
+            "DELETE FROM statements WHERE source = ? AND source_ref = ?",
+            (record.source, record.source_ref),
         )
     conn.execute(
         """
