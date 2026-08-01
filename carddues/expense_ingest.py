@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from html import unescape
 
-from . import db, gmail
+from . import db, gmail, issuers
 from .categories import resolve_category
 from .ingest import ProgressCallback, ProgressEvent
 from .models import SOURCE_GMAIL, Expense
@@ -89,17 +89,48 @@ _LOAN_OFFER_RE = re.compile(
     r")\b"
 )
 
+# Tokens Gmail can match in subject/body for issuer-domain alerts (bank-agnostic).
+SPEND_SEARCH_TOKENS = (
+    "Rs.",
+    "INR",
+    "debited",
+    "spent",
+    "UPI",
+    "purchase",
+    "paid to",
+)
+
+# Body/subject cues that mean a real spend (not only subject-line hints).
+_SPEND_CUE_RE = re.compile(
+    r"(?i)\b(?:"
+    r"debited"
+    r"|has\s+been\s+debited"
+    r"|spent"
+    r"|paid\s+to"
+    r"|purchase(?:\s+txn|\s+transaction)?"
+    r"|upi(?:\s+txn|\s+transaction|\s+payment)?"
+    r"|sent\s+using\s+upi"
+    r"|sent\s+via\s+upi"
+    r")\b"
+)
+
 _INR = re.compile(
     r"(?:rs\.?|inr|₹)\s*([0-9][0-9,]*(?:\.\d{1,2})?)",
     re.IGNORECASE,
 )
 # Capture merchant after common alert lead-ins; stop before dates / card boilerplate.
+# Higher-priority patterns first; catch-all `at|to` last.
 _MERCHANT_PATTERNS = (
-    # SBI / PhonePe: "Rs.X spent on your SBI Credit Card ending with 3418 at MERCHANT on DATE"
+    # "Rs.X spent on your … Card ending with NNNN at MERCHANT on DATE"
     re.compile(
         r"(?i)spent\s+on\s+your\s+.+?\s+at\s+"
         r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80}?)"
         r"(?=\s+on\s+\d|\s+via\s+|\s+using\s+|\s+ref(?:erence)?\b|[.,]|$)"
+    ),
+    re.compile(
+        r"(?i)(?:has\s+been\s+)?debited\s+(?:from\s+your\s+.+?\s+)?"
+        r"(?:towards|for|at|to)\s+"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
     ),
     re.compile(
         r"(?i)(?:purchase\s+transaction(?:\s+of\s+(?:rs\.?|inr|₹)\s*[0-9,]+\.?\d*)?)"
@@ -112,8 +143,8 @@ _MERCHANT_PATTERNS = (
         r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
     ),
     re.compile(
-        r"(?i)(?:spent\s+at|debited\s+(?:for|at|to)|paid\s+to|towards|"
-        r"info\s*:|merchant\s*:)\s+([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
+        r"(?i)(?:spent\s+at|paid\s+to|towards|info\s*:|merchant\s*:)\s+"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
     ),
     re.compile(
         r"(?i)\bUPI[_/]+([A-Za-z][A-Za-z0-9 &.'@/_-]{1,60})"
@@ -200,14 +231,21 @@ class ExpenseIngestSummary:
 
 
 def build_alert_query(lookback_days: int = 90) -> str:
-    """Gmail search for transaction-alert subjects only (not all bank mail)."""
+    """Gmail search for spend alerts via subject hints or issuer senders + spend cues."""
     subjects = " OR ".join(f'subject:"{hint}"' for hint in ALERT_SUBJECT_HINTS)
+    domains = " OR ".join(issuers.all_senders())
+    spend = " OR ".join(
+        f'"{token}"' if " " in token or token.endswith(".") else token
+        for token in SPEND_SEARCH_TOKENS
+    )
+    sender_branch = f"(from:({domains}) ({spend}))"
     skip = " ".join(
         f'-subject:"{token}"'
         for token in (*STATEMENT_SUBJECT_SKIP, *LOAN_OFFER_SUBJECT_SKIP)
     )
     return (
-        f"newer_than:{lookback_days}d -has:attachment ({subjects}) {skip}"
+        f"newer_than:{lookback_days}d -has:attachment "
+        f"(({subjects}) OR {sender_branch}) {skip}"
     ).strip()
 
 
@@ -271,13 +309,69 @@ def _vpa_merchant(blob: str) -> str | None:
 
 
 def _extract_merchant(blob: str) -> str | None:
-    """Best non-boilerplate merchant string found in subject+body."""
+    """Best non-boilerplate merchant string found in subject+body.
+
+    Walks patterns in priority order and returns the first clean hit; among
+    hits from the same pattern, prefers the longest cleaned merchant.
+    """
     for pattern in _MERCHANT_PATTERNS:
+        found: list[str] = []
         for match in pattern.finditer(blob):
             merchant = _clean_merchant(match.group(1))
             if merchant:
-                return merchant
+                found.append(merchant)
+        if found:
+            return max(found, key=len)
     return _vpa_merchant(blob)
+
+
+def _looks_like_spend(*, subject: str, body: str) -> bool:
+    """True when subject or body has a clear debit / purchase / UPI cue."""
+    if _SPEND_CUE_RE.search(f"{subject}\n{body}"):
+        return True
+    subject_l = subject.lower()
+    return any(
+        w in subject_l
+        for w in (
+            "spent",
+            "debited",
+            "debit",
+            "paid",
+            "purchase",
+            "txn",
+            "transaction",
+            "upi",
+            "sent using",
+            "sent via",
+            "payment was made",
+        )
+    )
+
+
+def _pick_amount(blob: str) -> float | None:
+    """Prefer the INR amount nearest a spend cue when several amounts appear."""
+    amounts = [
+        (match.start(), parse_amount(match.group(1)))
+        for match in _INR.finditer(blob)
+    ]
+    amounts = [
+        (pos, amount)
+        for pos, amount in amounts
+        if amount is not None and amount > 0
+    ]
+    if not amounts:
+        return None
+    cues = list(_SPEND_CUE_RE.finditer(blob))
+    if not cues:
+        return amounts[0][1]
+    best_amount = amounts[0][1]
+    best_dist: int | None = None
+    for pos, amount in amounts:
+        dist = min(abs(pos - cue.start()) for cue in cues)
+        if best_dist is None or dist < best_dist:
+            best_dist = dist
+            best_amount = amount
+    return best_amount
 
 
 def _clean_subject(subject: str) -> str | None:
@@ -340,34 +434,15 @@ def parse_alert_email(
 
     # Prefer debit-style alerts; skip pure credit/refund wording when no debit cue.
     creditish = any(w in subject_l for w in ("credited", "received", "refund", "cashback"))
-    debitish = any(
-        w in subject_l
-        for w in (
-            "spent",
-            "debited",
-            "debit",
-            "paid",
-            "purchase",
-            "txn",
-            "transaction",
-            "upi",
-            "sent using",
-            "sent via",
-        )
-    )
-    # Bodies that clearly describe a card purchase even when subject is vague.
-    if not debitish and re.search(
-        r"(?i)\b(?:purchase\s+transaction|spent\s+at|paid\s+to|debited)\b", body_plain
-    ):
-        debitish = True
+    debitish = _looks_like_spend(subject=subject, body=body_plain)
     if creditish and not debitish:
         return None
-
-    amounts = [parse_amount(m.group(1)) for m in _INR.finditer(blob)]
-    amounts = [a for a in amounts if a is not None and a > 0]
-    if not amounts:
+    if not debitish:
         return None
-    amount = amounts[0]
+
+    amount = _pick_amount(blob)
+    if amount is None:
+        return None
 
     spent_on: date | None = None
     for match in _DATE_INLINE.finditer(blob):

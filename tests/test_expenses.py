@@ -242,10 +242,30 @@ def test_alert_query_requires_transaction_subjects_and_skips_loans():
     assert 'subject:"payment was made using your credit card"' in query
     assert '-subject:"loan"' in query
     assert '-subject:"pre-approved"' in query
-    assert "from:" not in query
-    assert " OR subject:" in query or 'subject:"' in query
-    # Must not fall back to matching any mail from bank domains alone.
-    assert "from:hdfcbank" not in query
+    assert "from:(" in query
+    assert "hdfcbank.bank.in" in query or "hdfcbank.com" in query
+    assert "sbicard.com" in query
+    assert "debited" in query
+    assert "Rs." in query or '"Rs."' in query
+    # Must not match bank mail without a spend cue.
+    assert " OR " in query
+    assert "-has:attachment" in query
+
+
+def test_parse_unknown_subject_with_body_spend_cues():
+    """Novel subject still parses when the body has bank-agnostic spend wording."""
+    expense = expense_ingest.parse_alert_email(
+        subject="Important update on your account",
+        body=(
+            "Dear Customer, Rs. 499.00 has been debited from your Credit Card "
+            "ending 9999 towards ZOMATO ONLINE on 01-08-2026. "
+            "Also see our EMI of Rs. 2,500.00 if you convert this purchase."
+        ),
+        received_at=datetime(2026, 8, 1, 9, 0),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(499.0)
+    assert "ZOMATO" in expense.description.upper()
 
 
 def test_refresh_expense_from_gmail_updates_bad_description(conn, monkeypatch):
