@@ -3,7 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mydues</title>
+  <meta name="application-name" content="Mydues">
+  <meta name="apple-mobile-web-app-title" content="Mydues">
+  {% if tab == 'expenses' %}
+  <title>Expenses — Mydues</title>
+  {% elif tab == 'categories' %}
+  <title>Categories — Mydues</title>
+  {% else %}
+  <title>Credit cards — Mydues</title>
+  {% endif %}
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
