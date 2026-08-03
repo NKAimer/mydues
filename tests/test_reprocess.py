@@ -10,7 +10,7 @@ from mydues.web.app import create_app
 
 from .fixtures import STATEMENT_WITH_TRANSACTIONS, write_pdf
 
-PASSWORD = "NAVE1504"
+PASSWORD = "ADA1012"
 BODY = (
     "Dear Customer, your statement is attached. The password is the first 4 letters "
     "of your name in capital letters followed by your date of birth in DDMM format."
@@ -76,8 +76,8 @@ def add_card(conn, **overrides):
         "issuer": "hdfc",
         "label": "HDFC Infinia",
         "last4": "8765",
-        "name": "Naveen Kumar",
-        "dob": date(1990, 4, 15),
+        "name": "Ada Lovelace",
+        "dob": date(1815, 12, 10),
     }
     fields.update(overrides)
     card = Card(**fields)
@@ -257,8 +257,8 @@ def test_adding_a_card_on_the_dashboard_reopens_the_backlog(client, conn, gmail_
             "issuer": "hdfc",
             "last4": "8765",
             "label": "HDFC Infinia",
-            "name": "Naveen Kumar",
-            "dob": "15/04/1990",
+            "name": "Ada Lovelace",
+            "dob": "10/12/1815",
         },
         follow_redirects=True,
     )

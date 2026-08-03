@@ -119,11 +119,11 @@ def test_the_forms_ask_for_dates_as_ddmmyyyy(client, conn):
 def test_a_date_of_birth_is_taken_as_ddmmyyyy(client, conn):
     client.post(
         "/cards",
-        data={"issuer": "hdfc", "last4": "8765", "dob": "15/04/1990"},
+        data={"issuer": "hdfc", "last4": "8765", "dob": "10/12/1815"},
         follow_redirects=True,
     )
 
-    assert db.list_cards(conn)[0].dob == date(1990, 4, 15)
+    assert db.list_cards(conn)[0].dob == date(1815, 12, 10)
 
 
 def test_recording_a_payment_settles_the_card(client, conn):

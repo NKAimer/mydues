@@ -64,7 +64,7 @@ def write_pdf(path, *, password: str | None = None, lines: list[str] | None = No
 
 HDFC_TABLE = """
 HDFC Bank Credit Card Statement
-Name: NAVEEN KUMAR
+Name: ADA LOVELACE
 Card No: 4321 XXXX XXXX 8765
 
 Statement Date Payment Due Date Total Dues Minimum Amount Due
@@ -93,7 +93,7 @@ Available Credit Limit : Rs. 6,87,519.65
 # the real due date is missed and a sample date from the T&Cs is taken instead.
 ICICI_AMAZON_DOUBLED_HEADERS = """
 ICICI Bank Credit Card Statement
-MR. NAVEEN KUMAR
+MR. ADA LOVELACE
 SSTTAATTEEMMEENNTT DDAATTEE
 July 28, 2026
 PPAAYYMMEENNTT DDUUEE DDAATTEE
@@ -194,7 +194,7 @@ Minimum Amount Due 617.00
 HDFC_TATA_NEU_LIVE_LAYOUT = """
 Tata Neu Infinity HDFC Bank Credit Card Statement
 HSN Code: 997113 HDFC Bank Credit Cards GSTIN: 33AAACH2702H2Z6
-NAVEEN KUMAR Credit Card No. 652926XXXXXX2750
+ADA LOVELACE Credit Card No. 652926XXXXXX2750
 F3 Subhiksha Habitat Apartment Kaggadaspura Alternate Account Number 0001010410000722758
 Statement Date 01 Jul, 2026
 PREVIOUS STATEMENT DUES FINANCE CHARGES TOTAL AMOUNT DUE
@@ -210,7 +210,7 @@ Past Dues OVER LIMIT 3 MONTHS + 2 MONTHS 1 MONTH CURRENT DUES MINIMUM DUES
 # Swiggy HDFC uses the same fused MINIMUM DUE DUE DATE row.
 HDFC_SWIGGY_LIVE_LAYOUT = """
 Swiggy HDFC Bank Credit Card Statement
-Naveen Kumar Credit Card No. 526873XXXXXX6527
+Ada Lovelace Credit Card No. 526873XXXXXX6527
 Alternate Account Number 0001010610012476521
 Statement Date 20 Jul, 2026
 PREVIOUS STATEMENT DUES FINANCE CHARGES TOTAL AMOUNT DUE
@@ -266,7 +266,7 @@ Card No: XXXX XXXX XXXX 7788
 # Due" above the previous-balance line — that must not steal the total.
 AXIS_PAYMENT_SUMMARY = """
 Flipkart Axis Bank VISA Credit Card Statement
-NAVEEN KUMAR
+ADA LOVELACE
 PAYMENT SUMMARY
 Total Payment Due Minimum Payment Due Statement Period Payment Due Date Statement Generation Date
 554.00 Dr 100.00 Dr 17/09/2025 - 15/10/2025 04/11/2025 15/10/2025
@@ -277,7 +277,7 @@ Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Ch
 month would result in the repayment stretching
 48.00 Cr 0.00 418.00 1,020.00 0.00 0.00 554.00 Dr over years with consequent interest payment
 Account Summary
-Card No: 440006******0406 Name NAVEEN KUMAR
+Card No: 440006******0406 Name ADA LOVELACE
 25/09/2025 FLIPKART PAYMENTS,BANGALORE MISC STORE 225.00 Dr
 **** End of Statement ****
 Minimum Amount Due (MAD) by the due
@@ -298,7 +298,7 @@ For hassle free payments register for
 Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Charges =Total Payment Due Making only the minimum payment every
 month would result in the repayment stretching
 52.00 Cr 0.00 0.00 16,061.00 0.00 0.00 16,009.00 Dr over years with consequent interest payment
-Card No: 470011******0478 Name NAVEEN KUMAR
+Card No: 470011******0478 Name ADA LOVELACE
 **** End of Statement ****
 """
 
@@ -314,13 +314,13 @@ For hassle free payments register for
 Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Charges =Total Payment Due Making only the minimum payment every
 month would result in the repayment stretching
 310.00 Dr 0.00 0.00 0.00 0.00 0.00 154.00 Cr over years with consequent interest payment
-Card No: 539494******0083 Name NAVEEN KUMAR
+Card No: 539494******0083 Name ADA LOVELACE
 **** End of Statement ****
 """
 
 AMEX_INLINE = """
 American Express
-Prepared for NAVEEN KUMAR
+Prepared for ADA LOVELACE
 Account Number XXXX XXXXXX 91004
 
 Closing Date July 20, 2026
@@ -348,7 +348,7 @@ Available Credit 2,31,550.00
 # Transaction lines use compact DDMMM dates (25JUN) with optional CR.
 HSBC_LIVE_JULY = """
 HSBC LIVE+ CREDIT CARD Statement
-MR NAVEEN KUMAR
+MR ADA LOVELACE
 43xx xxxx xxxx 7672
 
 PAYMENT SUMMARY
@@ -389,7 +389,7 @@ Minimum Amount Due 1,000.00
 # Swiggy HDFC: Credit Card No. is 6527; alternate account digits must not become 2476.
 HDFC_SWIGGY_ALTERNATE = """
 Swiggy HDFC Bank Credit Card Statement
-Naveen Kumar Credit Card No. 526873XXXXXX6527
+Ada Lovelace Credit Card No. 526873XXXXXX6527
 RA Alternate Account Number 0001010610012476521
 Statement Date 20 Feb, 2026
 Total Amount Due 4,551.00

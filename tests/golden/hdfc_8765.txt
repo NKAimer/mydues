@@ -1,5 +1,5 @@
 HDFC Bank Credit Card Statement
-Name: NAVEEN KUMAR
+Name: ADA LOVELACE
 Card No: 4321 XXXX XXXX 8765
 
 Statement Date Payment Due Date Total Dues Minimum Amount Due

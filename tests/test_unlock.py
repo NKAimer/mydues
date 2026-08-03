@@ -16,7 +16,7 @@ HINT = (
     "first 4 letters of your name in capital letters."
 )
 # The rule above puts the digits first, an order the fallback guesses never try.
-STATED_PASSWORD = "8765NAVE"
+STATED_PASSWORD = "8765ADA"
 
 
 @pytest.fixture
@@ -25,8 +25,8 @@ def card(conn):
         issuer="hdfc",
         label="HDFC Infinia",
         last4="8765",
-        name="Naveen Kumar",
-        dob=date(1990, 4, 15),
+        name="Ada Lovelace",
+        dob=date(1815, 12, 10),
     )
     entry.id = db.add_card(conn, entry)
     return entry
@@ -80,7 +80,7 @@ def test_the_stated_rule_is_tried_before_the_guesses(conn, card, tmp_path, monke
 def test_an_unusual_rule_falls_back_to_guessing(conn, card, tmp_path):
     """The password here follows no stated rule, so the permutations must run."""
     path = tmp_path / "statement.pdf"
-    write_pdf(path, password="nave1504")
+    write_pdf(path, password="ada1012")
 
     result = ingest.ingest_pdf(conn, path, password_hint="The password is your library card number.")
     assert result.status == ingest.STATUS_PARSED

@@ -1,5 +1,5 @@
 Flipkart Axis Bank VISA Credit Card Statement
-NAVEEN KUMAR
+ADA LOVELACE
 PAYMENT SUMMARY
 Total Payment Due Minimum Payment Due Statement Period Payment Due Date Statement Generation Date
 554.00 Dr 100.00 Dr 17/09/2025 - 15/10/2025 04/11/2025 15/10/2025
@@ -10,7 +10,7 @@ Previous Balance - Payments - Credits + Purchase + Cash Advance + Other Debit&Ch
 month would result in the repayment stretching
 48.00 Cr 0.00 418.00 1,020.00 0.00 0.00 554.00 Dr over years with consequent interest payment
 Account Summary
-Card No: 440006******0406 Name NAVEEN KUMAR
+Card No: 440006******0406 Name ADA LOVELACE
 25/09/2025 FLIPKART PAYMENTS,BANGALORE MISC STORE 225.00 Dr
 **** End of Statement ****
 Minimum Amount Due (MAD) by the due

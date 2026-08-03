@@ -14,8 +14,8 @@ def make_card(**overrides) -> Card:
         "issuer": "hdfc",
         "label": "HDFC Infinia",
         "last4": "8765",
-        "name": "Naveen Kumar",
-        "dob": date(1990, 4, 15),
+        "name": "Ada Lovelace",
+        "dob": date(1815, 12, 10),
     }
     fields.update(overrides)
     return Card(**fields)
@@ -29,14 +29,14 @@ def test_name_initials_with_date_of_birth():
     hint = (
         "Your statement is password protected. The password is the first 4 letters "
         "of your name in capital letters followed by your date of birth in DDMM "
-        "format, for example NAVE0101."
+        "format, for example ADA0101."
     )
-    assert derive(hint) == ["NAVE1504"]
+    assert derive(hint) == ["ADA1012"]
 
 
 def test_date_of_birth_only():
     hint = "This file is password protected. Please enter your date of birth in DDMMYYYY."
-    assert derive(hint) == ["15041990"]
+    assert derive(hint) == ["10121815"]
 
 
 def test_surname_with_card_digits():
@@ -44,12 +44,12 @@ def test_surname_with_card_digits():
         "The password to open this PDF is the first four characters of your surname "
         "in CAPS and the last 4 digits of your card number."
     )
-    assert derive(hint) == ["KUMA8765"]
+    assert derive(hint) == ["LOVE8765"]
 
 
 def test_unstated_casing_tries_the_variants():
     hint = "Password: first 4 letters of your name and date of birth in DDMM."
-    assert derive(hint) == ["NAVE1504", "nave1504", "Nave1504"]
+    assert derive(hint) == ["ADA1012", "ada1012", "Ada1012"]
 
 
 def test_pan_based_rule():
@@ -59,12 +59,12 @@ def test_pan_based_rule():
 
 def test_separators_in_the_stated_format():
     hint = "The password for this file is your name in small letters and DD/MM/YYYY of birth."
-    assert derive(hint) == ["naveen15041990"]
+    assert derive(hint) == ["ada10121815"]
 
 
 def test_two_stated_formats_are_both_tried():
     hint = "Password is your date of birth as DDMM or DDMMYYYY."
-    assert derive(hint) == ["1504", "15041990"]
+    assert derive(hint) == ["1012", "10121815"]
 
 
 def test_a_rule_needing_digits_we_do_not_hold_is_refused():
@@ -92,8 +92,8 @@ def test_a_card_missing_the_details_is_skipped():
 
 def test_prose_without_a_password_rule_is_ignored():
     hint = (
-        "Dear Naveen Kumar, your statement for the card ending 8765 is attached. "
-        "Total due 45,231.50 by 15 August. Date of birth on record: 15/04/1990."
+        "Dear Ada Lovelace, your statement for the card ending 8765 is attached. "
+        "Total due 45,231.50 by 15 August. Date of birth on record: 10/12/1815."
     )
     assert derive(hint) == []
 
@@ -105,28 +105,28 @@ def test_only_password_sentences_are_read():
         "The password is your date of birth in DDMMYYYY. "
         "Call the last 4 digits of our helpline for support."
     )
-    assert derive(hint) == ["15041990"]
+    assert derive(hint) == ["10121815"]
 
 
 def test_the_word_file_name_is_not_a_name_rule():
     hint = "The attached file name is statement.pdf and the password is your date of birth DDMM."
-    assert derive(hint) == ["1504"]
+    assert derive(hint) == ["1012"]
 
 
 def test_rule_is_read_for_each_registered_card():
     hint = "Password: first 4 letters of your name in capitals and date of birth DDMM."
     other = make_card(issuer="axis", last4="1111", name="Asha Rao", dob=date(1985, 12, 2))
-    assert passwords.candidates_from_hint(hint, [make_card(), other]) == ["NAVE1504", "ASHA0212"]
+    assert passwords.candidates_from_hint(hint, [make_card(), other]) == ["ADA1012", "ASHA0212"]
 
 
 def test_derived_passwords_are_deduplicated():
     hint = "Password is date of birth in DDMM. The password is date of birth in DDMM."
-    assert derive(hint) == ["1504"]
+    assert derive(hint) == ["1012"]
 
 
 @pytest.mark.parametrize("spelling", ["pass word", "passcode", "PASSWORD"])
 def test_common_spellings_of_the_word(spelling):
-    assert derive(f"The {spelling} is your date of birth in DDMMYYYY.") == ["15041990"]
+    assert derive(f"The {spelling} is your date of birth in DDMMYYYY.") == ["10121815"]
 
 
 def _part(mime: str, text: str) -> dict:

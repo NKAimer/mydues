@@ -218,7 +218,7 @@ After `pip install -e .` (or `uv sync`), use `mydues`. Otherwise prefix with
 # Register a card. Name and date of birth are used to derive PDF passwords.
 # Adding a card also retries the statements still waiting to be opened.
 mydues cards add --issuer hdfc --last4 8765 --label "HDFC Infinia" \
-                   --limit 500000 --name "Naveen Kumar" --dob 01/07/1990
+                   --limit 500000 --name "Ada Lovelace" --dob 10/12/1815
 mydues cards list
 mydues cards remove 8765
 
@@ -236,7 +236,7 @@ mydues set 8765 --total 45231.50 --min 2270 --due 03/08/2026
 mydues paid 8765 --amount 20000
 
 # Open a statement that stayed locked; the password is kept for next month
-mydues unlock 'NAVE1504' --file statement.pdf
+mydues unlock 'ADA1012' --file statement.pdf
 
 # Work through the backlog of waiting attachments, a batch at a time (40 default)
 mydues reprocess --issuer hdfc
@@ -303,7 +303,7 @@ Issuers state the password rule in the covering mail, so `mydues/passwords.py`
 reads it rather than guessing. It looks only at the sentences mentioning the
 password, breaks the rule into components — "first 4 letters of your name in
 capitals", "date of birth in DDMM", "last 4 digits of your card" — and fills them
-from the card you registered. "NAVE1504" comes out of one attempt instead of
+from the card you registered. "ADA1012" comes out of one attempt instead of
 roughly 190.
 
 Three things happen when that isn't enough. A rule needing details you never

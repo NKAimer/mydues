@@ -197,8 +197,8 @@ def card_with_details(conn):
         issuer="hdfc",
         label="HDFC Infinia",
         last4="8765",
-        name="Naveen Kumar",
-        dob=date(1990, 4, 15),
+        name="Ada Lovelace",
+        dob=date(1815, 12, 10),
     )
     card.id = db.add_card(conn, card)
     return card

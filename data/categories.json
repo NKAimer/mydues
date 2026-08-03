@@ -617,42 +617,5 @@
       "category": "Food & dining"
     }
   ],
-  "merchants": [
-    {
-      "merchant_key": "15 34 upi smart kids c",
-      "category": "Shopping"
-    },
-    {
-      "merchant_key": "19 30 tata unistore limite 13 c",
-      "category": "Shopping"
-    },
-    {
-      "merchant_key": "apollo pharmacy",
-      "category": "Health"
-    },
-    {
-      "merchant_key": "bharatconnectutiliti",
-      "category": "Bills & utilities"
-    },
-    {
-      "merchant_key": "cas swiggy",
-      "category": "Food & dining"
-    },
-    {
-      "merchant_key": "icicilombard",
-      "category": "Bills & utilities"
-    },
-    {
-      "merchant_key": "jio mart",
-      "category": "Groceries"
-    },
-    {
-      "merchant_key": "reliance retail",
-      "category": "Groceries"
-    },
-    {
-      "merchant_key": "tata unistore",
-      "category": "Shopping"
-    }
-  ]
+  "merchants": []
 }
