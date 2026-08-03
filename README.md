@@ -8,7 +8,9 @@ transactions per card, and shows them in a local dashboard. A separate Expenses
 tab pulls bank / UPI spend-alert emails into a monthly ledger. Anything it cannot
 read, you type in yourself. Dates are written and read as **dd/mm/yyyy** throughout.
 
-![The mydues dashboard](docs/screenshot.png)
+## Author
+
+Naveen Kumar — [bkumarnaveen06@gmail.com](mailto:bkumarnaveen06@gmail.com)
 
 ## What this can and cannot tell you
 
@@ -17,7 +19,7 @@ statement date is not included. Every figure carries its statement date, its
 source and an as-of timestamp, and a card whose statement is older than 40 days
 is flagged as stale rather than quietly shown as settled.
 
-There is no way around this for a personal project:
+There is no way around this for a local / self-hosted tool:
 
 - **Account Aggregator** has a credit-card schema (`totalDueAmount`, `minDueAmount`,
   `creditLimit`, `availableCredit`) but no issuer has activated the credit-card
@@ -86,6 +88,9 @@ For development / tests, also install:
    address under **Test users**. The app stays unverified, which is fine for one
    user. (While the consent screen is in **Testing**, refresh tokens expire about
    every 7 days — see [docs/gmail-oauth.md](docs/gmail-oauth.md).)
+   Each person who runs mydues needs their own Google Cloud project (or OAuth
+   client) and must add their Gmail address as a test user while the consent
+   screen is in Testing.
 3. Create an OAuth client. Either type works:
    - **Desktop app** — nothing else to configure. Google allows the loopback
      redirect this app uses.

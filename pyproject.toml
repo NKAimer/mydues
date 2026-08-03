@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "mydues"
 version = "0.1.0"
 description = "Track Indian credit card dues from statement emails"
+authors = [
+  { name = "Naveen Kumar", email = "bkumarnaveen06@gmail.com" },
+]
 requires-python = ">=3.11"
 dependencies = [
     "google-api-python-client>=2.180",
