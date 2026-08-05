@@ -132,6 +132,48 @@ def test_parse_hsbc_purchase_at_merchant():
     assert expense.category == "Health"
 
 
+def test_parse_hsbc_payment_to_merchant_ignores_fraud_boilerplate():
+    expense = expense_ingest.parse_alert_email(
+        subject=(
+            "You have used your HSBC Credit Card ending with 7672 "
+            "for a purchase transaction"
+        ),
+        body=(
+            "POS ONLINE Dear Customer, We write to confirm that your Credit card "
+            "no ending with 7672,has been used for INR 533.00 for payment to "
+            "RELIANCE RETAIL LIMITED on 03 Aug 2026 at 09:18. If you want to "
+            "report this as a fraud transaction and block your card, For Retail "
+            "cards: Please call 18002673456."
+        ),
+        received_at=datetime(2026, 8, 3, 9, 20),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(533.0)
+    assert "RELIANCE" in expense.description.upper()
+    assert "fraud" not in expense.description.lower()
+    assert expense.category == "Groceries"
+
+
+def test_parse_axis_merchant_name_field():
+    expense = expense_ingest.parse_alert_email(
+        subject="INR 1419 spent on credit card no. XX0406",
+        body=(
+            "05-08-2026 Dear Customer, Here's the summary of your Axis Bank Credit "
+            "Card Transaction: Transaction Amount: INR 1419 Merchant Name: MYNTRA "
+            "DESI Axis Bank Credit Card No. XX0406 Date & Time: 05-08-2026, 20:42:09 "
+            "IST Available Limit*: INR 398972 Always open to help you. Regards, "
+            "Axis Bank Ltd."
+        ),
+        received_at=datetime(2026, 8, 5, 20, 45),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(1419.0)
+    assert "MYNTRA" in expense.description.upper()
+    assert "regards" not in expense.description.lower()
+    assert "help you" not in expense.description.lower()
+    assert expense.category == "Shopping"
+
+
 def test_parse_rejects_visa_marketing_as_description():
     expense = expense_ingest.parse_alert_email(
         subject="Transaction Alert: INR 10.00 spent",

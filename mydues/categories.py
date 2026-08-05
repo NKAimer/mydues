@@ -71,6 +71,7 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
         "dmart",
         "d-mart",
         "reliance fresh",
+        "reliance retail",
         "supermarket",
         "grocer",
         "kirana",

@@ -129,6 +129,19 @@ _INR = re.compile(
 # Capture merchant after common alert lead-ins; stop before dates / card boilerplate.
 # Higher-priority patterns first; catch-all `at|to` last.
 _MERCHANT_PATTERNS = (
+    # Axis (and similar): "Merchant Name: MYNTRA DESI"
+    re.compile(
+        r"(?i)merchant\s*name\s*:\s*"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80}?)"
+        r"(?=\s+Axis\s+Bank|\s+Credit\s+Card|\s+Date\b|\s+Available|"
+        r"\s+Card\s+No|\s+Transaction\b|[.,]|$)"
+    ),
+    # HSBC POS: "used for INR X for payment to MERCHANT on DD Mon YYYY"
+    re.compile(
+        r"(?i)(?:for\s+)?payment\s+to\s+"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80}?)"
+        r"(?=\s+on\s+\d|\s+at\s+\d|[.,]|$)"
+    ),
     # "Rs.X spent on your … Card ending with NNNN at MERCHANT on DATE"
     re.compile(
         r"(?i)spent\s+on\s+your\s+.+?\s+at\s+"
@@ -170,7 +183,7 @@ _VPA_RE = re.compile(
 _MERCHANT_STOP = re.compile(
     r"(?i)\s+(?:using\s+your|on\s+your\s+card|on\s+\d|ref(?:erence)?(?:\s+no)?\.?|"
     r"upi\s*:|avl\s+bal|available\s+balance|not\s+you|if\s+not|otp|a/c|account|"
-    r"via\s+upi|ending\s+with|for\s+a\s+purchase).*$"
+    r"via\s+upi|ending\s+with|for\s+a\s+purchase|axis\s+bank).*$"
 )
 _SUBJECT_PREFIX = re.compile(
     r"(?i)^(transaction\s+alert|txn\s+alert|debit\s+alert|card\s+transaction|"
@@ -201,6 +214,18 @@ _BAD_MERCHANT = re.compile(
     r"|txn\s+alert"
     r"|not\s+you"
     r"|if\s+not\s+you"
+    r"|report\s+this\s+as\s+a\s+fraud"
+    r"|fraud\s+transaction"
+    r"|block\s+your\s+card"
+    r"|help\s+you"
+    r"|always\s+open"
+    r"|regards"
+    r"|this\s+email"
+    r"|locate\s+an\s+hsbc"
+    r"|phone\s*banking"
+    r"|system\s+generated"
+    r"|toll\s+free"
+    r"|charges\s+applicable"
     r")\b"
 )
 _NOTE_MAX = 160
