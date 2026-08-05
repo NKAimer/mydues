@@ -174,6 +174,54 @@ def test_parse_axis_merchant_name_field():
     assert expense.category == "Shopping"
 
 
+def test_parse_uses_db_payee_cue(conn):
+    """Editable cues extract Axis-style payees even without built-in patterns."""
+    conn.execute("DELETE FROM payee_cues")
+    conn.commit()
+    db.upsert_payee_cue(conn, "Merchant Name:")
+    expense = expense_ingest.parse_alert_email(
+        subject="INR 1419 spent on credit card no. XX0406",
+        body=(
+            "Transaction Amount: INR 1419 Merchant Name: MYNTRA DESI "
+            "Axis Bank Credit Card No. XX0406 Date & Time: 05-08-2026"
+        ),
+        received_at=datetime(2026, 8, 5, 20, 45),
+        conn=conn,
+    )
+    assert expense is not None
+    assert "MYNTRA" in expense.description.upper()
+
+
+def test_parse_applies_payee_alias(conn):
+    db.upsert_payee_alias(conn, "myntra desi", "Myntra")
+    expense = expense_ingest.parse_alert_email(
+        subject="INR 1419 spent on credit card no. XX0406",
+        body=(
+            "Transaction Amount: INR 1419 Merchant Name: MYNTRA DESI "
+            "Axis Bank Credit Card No. XX0406 Date & Time: 05-08-2026"
+        ),
+        received_at=datetime(2026, 8, 5, 20, 45),
+        conn=conn,
+    )
+    assert expense is not None
+    assert expense.description == "Myntra"
+
+
+def test_parse_rejects_boilerplate_despite_cues(conn):
+    expense = expense_ingest.parse_alert_email(
+        subject="Transaction Alert: INR 10.00 spent",
+        body=(
+            "Rs. 10.00 spent at a world of Visa Infinite benefits Everyday cashback "
+            "using your card on 01-08-2026."
+        ),
+        received_at=datetime(2026, 8, 1, 11, 0),
+        conn=conn,
+    )
+    assert expense is not None
+    assert "visa infinite" not in expense.description.lower()
+    assert "everyday cashback" not in expense.description.lower()
+
+
 def test_parse_rejects_visa_marketing_as_description():
     expense = expense_ingest.parse_alert_email(
         subject="Transaction Alert: INR 10.00 spent",

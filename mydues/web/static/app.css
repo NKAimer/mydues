@@ -467,6 +467,19 @@ code.copyable {
   margin-top: 24px;
 }
 
+.category-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.category-section > summary {
+  display: flex;
+  align-items: center;
+  width: fit-content;
+}
+
 .issues { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .issues li {
   font-size: 15px;

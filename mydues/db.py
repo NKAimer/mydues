@@ -115,6 +115,19 @@ CREATE TABLE IF NOT EXISTS category_phrases (
     updated_at TEXT NOT NULL,
     UNIQUE (phrase)
 );
+
+CREATE TABLE IF NOT EXISTS payee_cues (
+    id INTEGER PRIMARY KEY,
+    cue TEXT NOT NULL COLLATE NOCASE,
+    updated_at TEXT NOT NULL,
+    UNIQUE (cue)
+);
+
+CREATE TABLE IF NOT EXISTS payee_aliases (
+    raw_key TEXT PRIMARY KEY,
+    payee TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 # Columns added after the first release. SQLite cannot express these with
@@ -193,6 +206,7 @@ def init(conn: sqlite3.Connection) -> None:
             """
         )
     seed_category_phrases_from_builtins(conn)
+    seed_payee_cues_from_builtins(conn)
     merge_categories_seed(conn)
     conn.commit()
 
@@ -226,8 +240,32 @@ def seed_category_phrases_from_builtins(conn: sqlite3.Connection) -> int:
     return inserted
 
 
+def seed_payee_cues_from_builtins(conn: sqlite3.Connection) -> int:
+    """Insert default payee lead-in cues when that table is empty."""
+    row = conn.execute("SELECT COUNT(*) AS n FROM payee_cues").fetchone()
+    if row and int(row["n"]) > 0:
+        return 0
+    from .expense_ingest import DEFAULT_PAYEE_CUES
+
+    now = datetime.now().isoformat(timespec="seconds")
+    inserted = 0
+    for cue in DEFAULT_PAYEE_CUES:
+        value = (cue or "").strip().lower()
+        if not value:
+            continue
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO payee_cues (cue, updated_at)
+            VALUES (?, ?)
+            """,
+            (value, now),
+        )
+        inserted += cursor.rowcount or 0
+    return inserted
+
+
 def categories_seed_payload(conn: sqlite3.Connection) -> dict:
-    """Snapshot phrase rules and merchant overrides for the committed seed file."""
+    """Snapshot phrase rules, merchant overrides, and payee rules for the seed file."""
     phrases = [
         {"phrase": row["phrase"], "category": row["category"]}
         for row in conn.execute(
@@ -242,7 +280,25 @@ def categories_seed_payload(conn: sqlite3.Connection) -> dict:
             "ORDER BY merchant_key COLLATE NOCASE"
         )
     ]
-    return {"phrases": phrases, "merchants": merchants}
+    payee_cues = [
+        {"cue": row["cue"]}
+        for row in conn.execute(
+            "SELECT cue FROM payee_cues ORDER BY cue COLLATE NOCASE"
+        )
+    ]
+    payee_aliases = [
+        {"raw_key": row["raw_key"], "payee": row["payee"]}
+        for row in conn.execute(
+            "SELECT raw_key, payee FROM payee_aliases "
+            "ORDER BY raw_key COLLATE NOCASE"
+        )
+    ]
+    return {
+        "phrases": phrases,
+        "merchants": merchants,
+        "payee_cues": payee_cues,
+        "payee_aliases": payee_aliases,
+    }
 
 
 def write_categories_seed(
@@ -258,20 +314,20 @@ def write_categories_seed(
 
 def merge_categories_seed(
     conn: sqlite3.Connection, path: Path | None = None
-) -> tuple[int, int]:
-    """Add missing seed phrases/merchants. Local rows win on key conflicts.
+) -> tuple[int, int, int, int]:
+    """Add missing seed rows. Local rows win on key conflicts.
 
-    Returns ``(phrases_inserted, merchants_inserted)``. Missing file → (0, 0).
+    Returns ``(phrases, merchants, payee_cues, payee_aliases)`` inserted counts.
     """
     target = path or config.categories_seed_path()
     if not target.is_file():
-        return 0, 0
+        return 0, 0, 0, 0
     try:
         payload = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return 0, 0
+        return 0, 0, 0, 0
     if not isinstance(payload, dict):
-        return 0, 0
+        return 0, 0, 0, 0
 
     now = datetime.now().isoformat(timespec="seconds")
     phrases_inserted = 0
@@ -309,7 +365,40 @@ def merge_categories_seed(
         )
         merchants_inserted += cursor.rowcount or 0
 
-    return phrases_inserted, merchants_inserted
+    cues_inserted = 0
+    for item in payload.get("payee_cues") or []:
+        if not isinstance(item, dict):
+            continue
+        cue = (item.get("cue") or "").strip().lower()
+        if not cue:
+            continue
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO payee_cues (cue, updated_at)
+            VALUES (?, ?)
+            """,
+            (cue, now),
+        )
+        cues_inserted += cursor.rowcount or 0
+
+    aliases_inserted = 0
+    for item in payload.get("payee_aliases") or []:
+        if not isinstance(item, dict):
+            continue
+        raw_key = (item.get("raw_key") or "").strip().lower()
+        payee = (item.get("payee") or "").strip()
+        if not raw_key or not payee:
+            continue
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO payee_aliases (raw_key, payee, updated_at)
+            VALUES (?, ?, ?)
+            """,
+            (raw_key, payee, now),
+        )
+        aliases_inserted += cursor.rowcount or 0
+
+    return phrases_inserted, merchants_inserted, cues_inserted, aliases_inserted
 
 
 def _iso(value: date | datetime | None) -> str | None:
@@ -1232,6 +1321,154 @@ def update_merchant_category(
 def delete_merchant_category(conn: sqlite3.Connection, merchant_key: str) -> bool:
     cursor = conn.execute(
         "DELETE FROM merchant_categories WHERE merchant_key = ?", (merchant_key,)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def list_payee_cues(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, cue, updated_at FROM payee_cues ORDER BY cue COLLATE NOCASE"
+    ).fetchall()
+
+
+def list_payee_cue_strings(conn: sqlite3.Connection) -> list[str]:
+    """Lowercased cue strings for merchant extraction."""
+    return [
+        (row["cue"] or "").strip().lower()
+        for row in conn.execute("SELECT cue FROM payee_cues ORDER BY length(cue) DESC")
+        if (row["cue"] or "").strip()
+    ]
+
+
+def upsert_payee_cue(conn: sqlite3.Connection, cue: str) -> int | None:
+    """Insert or refresh a payee lead-in cue. Returns row id, or None if blank."""
+    cue = (cue or "").strip().lower()
+    if not cue:
+        return None
+    now = datetime.now().isoformat(timespec="seconds")
+    conn.execute(
+        """
+        INSERT INTO payee_cues (cue, updated_at)
+        VALUES (?, ?)
+        ON CONFLICT (cue) DO UPDATE SET
+            updated_at = excluded.updated_at
+        """,
+        (cue, now),
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT id FROM payee_cues WHERE cue = ? COLLATE NOCASE", (cue,)
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
+def update_payee_cue(conn: sqlite3.Connection, cue_id: int, *, cue: str) -> bool:
+    """Update a cue by id. True if a row changed."""
+    cue = (cue or "").strip().lower()
+    if not cue:
+        return False
+    try:
+        cursor = conn.execute(
+            """
+            UPDATE payee_cues
+            SET cue = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (cue, datetime.now().isoformat(timespec="seconds"), cue_id),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except sqlite3.IntegrityError:
+        return False
+
+
+def delete_payee_cue(conn: sqlite3.Connection, cue_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM payee_cues WHERE id = ?", (cue_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def list_payee_aliases(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT raw_key, payee, updated_at FROM payee_aliases "
+        "ORDER BY raw_key COLLATE NOCASE"
+    ).fetchall()
+
+
+def upsert_payee_alias(
+    conn: sqlite3.Connection, raw_key: str, payee: str
+) -> bool:
+    """Insert or refresh a raw→display payee mapping."""
+    raw_key = (raw_key or "").strip().lower()
+    payee = (payee or "").strip()
+    if not raw_key or not payee:
+        return False
+    conn.execute(
+        """
+        INSERT INTO payee_aliases (raw_key, payee, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT (raw_key) DO UPDATE SET
+            payee = excluded.payee,
+            updated_at = excluded.updated_at
+        """,
+        (raw_key, payee, datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    return True
+
+
+def update_payee_alias(
+    conn: sqlite3.Connection,
+    raw_key: str,
+    payee: str,
+    *,
+    new_key: str | None = None,
+) -> bool:
+    """Change display name and optionally rename the raw key. True if saved."""
+    payee = (payee or "").strip()
+    old_key = (raw_key or "").strip().lower()
+    target = ((new_key if new_key is not None else old_key) or "").strip().lower()
+    if not old_key or not payee or not target:
+        return False
+
+    exists = conn.execute(
+        "SELECT 1 FROM payee_aliases WHERE raw_key = ?", (old_key,)
+    ).fetchone()
+    if exists is None:
+        return False
+
+    now = datetime.now().isoformat(timespec="seconds")
+    if target == old_key:
+        cursor = conn.execute(
+            """
+            UPDATE payee_aliases
+            SET payee = ?, updated_at = ?
+            WHERE raw_key = ?
+            """,
+            (payee, now, old_key),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+    conn.execute(
+        """
+        INSERT INTO payee_aliases (raw_key, payee, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT (raw_key) DO UPDATE SET
+            payee = excluded.payee,
+            updated_at = excluded.updated_at
+        """,
+        (target, payee, now),
+    )
+    conn.execute("DELETE FROM payee_aliases WHERE raw_key = ?", (old_key,))
+    conn.commit()
+    return True
+
+
+def delete_payee_alias(conn: sqlite3.Connection, raw_key: str) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM payee_aliases WHERE raw_key = ?", ((raw_key or "").strip().lower(),)
     )
     conn.commit()
     return cursor.rowcount > 0

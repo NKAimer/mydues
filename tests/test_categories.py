@@ -9,10 +9,12 @@ from mydues.categories import (
     CATEGORY_MEMORY,
     UNCATEGORIZED,
     apply_category_rules,
+    apply_payee_alias,
     categorise,
     category_spend_totals,
     lookup_merchant_category,
     remember_merchant_category,
+    remember_payee_alias,
     resolve_category,
 )
 from mydues import db, expense_ingest
@@ -808,12 +810,19 @@ def test_categories_seed_export_and_merge_local_wins(conn, tmp_path):
     seed = tmp_path / "categories.json"
     db.upsert_category_phrase(conn, "custom cafe", "Food & dining")
     db.upsert_merchant_category_key(conn, "customcafe", "Food & dining")
+    db.upsert_payee_cue(conn, "custom cue:")
+    db.upsert_payee_alias(conn, "raw shop", "Display Shop")
 
     written = db.write_categories_seed(conn, seed)
     assert written == seed
     payload = json.loads(seed.read_text(encoding="utf-8"))
     assert any(p["phrase"] == "custom cafe" for p in payload["phrases"])
     assert any(m["merchant_key"] == "customcafe" for m in payload["merchants"])
+    assert any(c["cue"] == "custom cue:" for c in payload["payee_cues"])
+    assert any(
+        a["raw_key"] == "raw shop" and a["payee"] == "Display Shop"
+        for a in payload["payee_aliases"]
+    )
 
     # Fresh DB: seed merges after builtins.
     conn2 = db.connect(tmp_path / "other.db")
@@ -821,31 +830,46 @@ def test_categories_seed_export_and_merge_local_wins(conn, tmp_path):
     # Clear and re-merge from our seed only (init may have used repo seed).
     conn2.execute("DELETE FROM category_phrases")
     conn2.execute("DELETE FROM merchant_categories")
+    conn2.execute("DELETE FROM payee_cues")
+    conn2.execute("DELETE FROM payee_aliases")
     conn2.commit()
-    phrases, merchants = db.merge_categories_seed(conn2, seed)
+    phrases, merchants, cues, aliases = db.merge_categories_seed(conn2, seed)
     conn2.commit()
     assert phrases >= 1
     assert merchants >= 1
+    assert cues >= 1
+    assert aliases >= 1
     assert any(
         r["phrase"] == "custom cafe" and r["category"] == "Food & dining"
         for r in db.list_category_phrases(conn2)
     )
+    assert any(r["cue"] == "custom cue:" for r in db.list_payee_cues(conn2))
+    assert any(
+        r["raw_key"] == "raw shop" and r["payee"] == "Display Shop"
+        for r in db.list_payee_aliases(conn2)
+    )
 
     # Local wins: existing phrase category is not overwritten by seed.
     db.upsert_category_phrase(conn2, "custom cafe", "Shopping")
+    db.upsert_payee_cue(conn2, "custom cue:")
+    db.upsert_payee_alias(conn2, "raw shop", "Local Shop")
     seed.write_text(
         json.dumps(
             {
                 "phrases": [{"phrase": "custom cafe", "category": "Food & dining"}],
                 "merchants": [{"merchant_key": "customcafe", "category": "Travel"}],
+                "payee_cues": [{"cue": "custom cue:"}],
+                "payee_aliases": [{"raw_key": "raw shop", "payee": "Seed Shop"}],
             }
         ),
         encoding="utf-8",
     )
-    again_p, again_m = db.merge_categories_seed(conn2, seed)
+    again_p, again_m, again_c, again_a = db.merge_categories_seed(conn2, seed)
     conn2.commit()
     assert again_p == 0
     assert again_m == 0
+    assert again_c == 0
+    assert again_a == 0
     row = conn2.execute(
         "SELECT category FROM category_phrases WHERE phrase = ?", ("custom cafe",)
     ).fetchone()
@@ -855,3 +879,29 @@ def test_categories_seed_export_and_merge_local_wins(conn, tmp_path):
         ("customcafe",),
     ).fetchone()
     assert merchant["category"] == "Food & dining"
+    alias = conn2.execute(
+        "SELECT payee FROM payee_aliases WHERE raw_key = ?", ("raw shop",)
+    ).fetchone()
+    assert alias["payee"] == "Local Shop"
+
+
+def test_payee_cue_and_alias_crud(conn):
+    cue_id = db.upsert_payee_cue(conn, "Merchant Name:")
+    assert cue_id is not None
+    assert "merchant name:" in db.list_payee_cue_strings(conn)
+    assert db.update_payee_cue(conn, cue_id, cue="paid towards")
+    assert db.delete_payee_cue(conn, cue_id)
+
+    assert db.upsert_payee_alias(conn, "myntra desi", "Myntra")
+    assert db.update_payee_alias(
+        conn, "myntra desi", "Myntra Fashion", new_key="myntra desi designs"
+    )
+    rows = db.list_payee_aliases(conn)
+    assert any(r["raw_key"] == "myntra desi designs" for r in rows)
+    assert db.delete_payee_alias(conn, "myntra desi designs")
+
+
+def test_apply_and_remember_payee_alias(conn):
+    remember_payee_alias(conn, "MYNTRA DESI", "Myntra")
+    assert apply_payee_alias(conn, "MYNTRA DESI") == "Myntra"
+    assert apply_payee_alias(conn, "Unknown Shop") == "Unknown Shop"

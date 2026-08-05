@@ -12,12 +12,29 @@ from datetime import date, datetime
 from html import unescape
 
 from . import db, gmail, issuers
-from .categories import resolve_category
+from .categories import apply_payee_alias, resolve_category
 from .ingest import ProgressCallback, ProgressEvent
 from .models import SOURCE_GMAIL, Expense
 from .text import parse_amount, parse_date
 
 logger = logging.getLogger(__name__)
+
+# Default lead-ins that mark the payee in alert bodies (seeded into payee_cues).
+DEFAULT_PAYEE_CUES = (
+    "merchant name:",
+    "payment to",
+    "towards",
+    "spent at",
+    "info:",
+    "paid to",
+)
+
+# Stop capturing the payee when bank boilerplate / dates begin.
+_CUE_STOP_AHEAD = (
+    r"(?=\s+Axis\s+Bank|\s+Credit\s+Card|\s+Date\b|\s+Available|"
+    r"\s+Card\s+No|\s+Transaction\b|\s+on\s+\d|\s+at\s+\d|"
+    r"\s+via\s+|\s+using\s+|\s+ref(?:erence)?\b|[.,]|$)"
+)
 
 
 def _emit(on_progress: ProgressCallback | None, event: ProgressEvent) -> None:
@@ -345,12 +362,53 @@ def _vpa_merchant(blob: str) -> str | None:
     return None
 
 
-def _extract_merchant(blob: str) -> str | None:
+def _pattern_for_cue(cue: str) -> re.Pattern[str]:
+    """Build a regex that captures the payee after a lead-in cue."""
+    parts = re.split(r"(\s+)", (cue or "").strip())
+    escaped: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        if part.isspace():
+            escaped.append(r"\s+")
+        else:
+            escaped.append(re.escape(part))
+    cue_re = "".join(escaped) or re.escape(cue.strip())
+    return re.compile(
+        rf"(?i){cue_re}\s*"
+        rf"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{{1,80}}?)"
+        rf"{_CUE_STOP_AHEAD}"
+    )
+
+
+def _extract_from_cues(blob: str, cues: list[str]) -> str | None:
+    """Try editable/default cues before the built-in pattern list."""
+    for cue in cues:
+        value = (cue or "").strip()
+        if not value:
+            continue
+        found: list[str] = []
+        for match in _pattern_for_cue(value).finditer(blob):
+            merchant = _clean_merchant(match.group(1))
+            if merchant:
+                found.append(merchant)
+        if found:
+            return max(found, key=len)
+    return None
+
+
+def _extract_merchant(
+    blob: str, *, cues: list[str] | None = None
+) -> str | None:
     """Best non-boilerplate merchant string found in subject+body.
 
-    Walks patterns in priority order and returns the first clean hit; among
-    hits from the same pattern, prefers the longest cleaned merchant.
+    Tries editable/default cues first, then built-in patterns; among hits from
+    the same cue/pattern, prefers the longest cleaned merchant.
     """
+    active = list(cues) if cues is not None else list(DEFAULT_PAYEE_CUES)
+    from_cues = _extract_from_cues(blob, active)
+    if from_cues:
+        return from_cues
     for pattern in _MERCHANT_PATTERNS:
         found: list[str] = []
         for match in pattern.finditer(blob):
@@ -456,8 +514,13 @@ def parse_alert_email(
     subject: str,
     body: str,
     received_at: datetime | None = None,
+    conn=None,
 ) -> Expense | None:
-    """Pull amount / date / merchant description from a typical Indian bank alert."""
+    """Pull amount / date / merchant description from a typical Indian bank alert.
+
+    When ``conn`` is provided, uses ``payee_cues`` / ``payee_aliases`` from the
+    DB; otherwise falls back to ``DEFAULT_PAYEE_CUES`` only.
+    """
     subject_l = subject.lower()
     if any(token in subject_l for token in STATEMENT_SUBJECT_SKIP):
         return None
@@ -495,10 +558,13 @@ def parse_alert_email(
     if spent_on is None:
         spent_on = date.today()
 
-    merchant = _extract_merchant(blob)
+    cues = db.list_payee_cue_strings(conn) if conn is not None else None
+    merchant = _extract_merchant(blob, cues=cues)
     description = merchant or _clean_subject(subject) or "Gmail alert"
+    if conn is not None:
+        description = apply_payee_alias(conn, description)
     note = _short_note(subject=subject, body_plain=body_plain, description=description)
-    category, source = resolve_category(description, note=note, conn=None)
+    category, source = resolve_category(description, note=note, conn=conn)
 
     return Expense(
         spent_on=spent_on,
@@ -544,6 +610,7 @@ def refresh_expense_from_gmail(
         subject=message.subject or "",
         body=message.body or "",
         received_at=received_at,
+        conn=conn,
     )
     if parsed is None:
         return False
@@ -648,6 +715,7 @@ def ingest_expense_alerts(
             subject=message.subject or "",
             body=message.body or "",
             received_at=message.received_at,
+            conn=conn,
         )
         if expense is None:
             summary.skipped += 1

@@ -584,8 +584,11 @@ def cmd_categories_export(args) -> int:
     target = db.write_categories_seed(conn, path)
     payload = db.categories_seed_payload(conn)
     console.print(
-        f"Wrote [bold]{len(payload['phrases'])}[/bold] phrases and "
-        f"[bold]{len(payload['merchants'])}[/bold] merchants to [bold]{target}[/bold]"
+        f"Wrote [bold]{len(payload['phrases'])}[/bold] phrases, "
+        f"[bold]{len(payload['merchants'])}[/bold] merchants, "
+        f"[bold]{len(payload['payee_cues'])}[/bold] payee cues, and "
+        f"[bold]{len(payload['payee_aliases'])}[/bold] payee aliases "
+        f"to [bold]{target}[/bold]"
     )
     console.print("Commit that file to share category rules (not the full database).")
     return 0
@@ -599,12 +602,14 @@ def cmd_categories_import(args) -> int:
     if not path.is_file():
         console.print(f"[red]No seed file at {path}[/red]")
         return 1
-    phrases, merchants = db.merge_categories_seed(conn, path)
+    phrases, merchants, cues, aliases = db.merge_categories_seed(conn, path)
     conn.commit()
     console.print(
         f"Merged from [bold]{path}[/bold]: "
         f"[green]{phrases}[/green] new phrase(s), "
-        f"[green]{merchants}[/green] new merchant(s)"
+        f"[green]{merchants}[/green] new merchant(s), "
+        f"[green]{cues}[/green] new payee cue(s), "
+        f"[green]{aliases}[/green] new payee alias(es)"
     )
     return 0
 

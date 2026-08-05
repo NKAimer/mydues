@@ -617,5 +617,31 @@
       "category": "Food & dining"
     }
   ],
-  "merchants": []
+  "merchants": [],
+  "payee_cues": [
+    {
+      "cue": "merchant name:"
+    },
+    {
+      "cue": "payment to"
+    },
+    {
+      "cue": "towards"
+    },
+    {
+      "cue": "spent at"
+    },
+    {
+      "cue": "info:"
+    },
+    {
+      "cue": "paid to"
+    }
+  ],
+  "payee_aliases": [
+    {
+      "raw_key": "myntra desi",
+      "payee": "Myntra"
+    }
+  ]
 }

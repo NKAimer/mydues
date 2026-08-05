@@ -15,6 +15,7 @@ from ..categories import (
     category_spend_totals,
     merchant_key,
     remember_merchant_category,
+    remember_payee_alias,
 )
 from ..dues import format_inr
 from ..models import CATEGORY_USER, SOURCE_GMAIL, SOURCE_MANUAL, Card, Expense, StatementRecord
@@ -322,6 +323,8 @@ def create_app() -> Flask:
             card_category_totals=category_spend_totals(card_month_txns),
             category_phrases=db.list_category_phrases(conn),
             merchant_category_rows=db.list_merchant_categories(conn),
+            payee_cues=db.list_payee_cues(conn),
+            payee_aliases=db.list_payee_aliases(conn),
             known_categories=list(CATEGORY_KEYWORDS.keys()),
         )
 
@@ -803,13 +806,93 @@ def create_app() -> Flask:
             _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
 
+    @app.post("/payee-cues")
+    def add_payee_cue():
+        conn = db.connect()
+        db.init(conn)
+        cue = (request.form.get("cue") or "").strip()
+        if not cue:
+            flash("Enter a payee cue.", "error")
+            return redirect(url_for("index", tab="categories"))
+        if db.upsert_payee_cue(conn, cue) is None:
+            flash("Enter a payee cue.", "error")
+        else:
+            flash(f"Payee cue “{cue}” saved.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/payee-cues/<int:cue_id>/edit")
+    def edit_payee_cue(cue_id: int):
+        conn = db.connect()
+        db.init(conn)
+        cue = (request.form.get("cue") or "").strip()
+        if not cue:
+            flash("Enter a payee cue.", "error")
+            return redirect(url_for("index", tab="categories"))
+        if not db.update_payee_cue(conn, cue_id, cue=cue):
+            flash("Could not update that cue (gone or duplicate).", "error")
+        else:
+            flash(f"Updated payee cue “{cue}”.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/payee-cues/<int:cue_id>/delete")
+    def delete_payee_cue(cue_id: int):
+        conn = db.connect()
+        db.init(conn)
+        if not db.delete_payee_cue(conn, cue_id):
+            flash("That cue is gone.", "error")
+        else:
+            flash("Removed payee cue.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/payee-aliases")
+    def add_payee_alias():
+        conn = db.connect()
+        db.init(conn)
+        raw = (request.form.get("raw") or "").strip()
+        payee = (request.form.get("payee") or "").strip()
+        key = merchant_key(raw)
+        if not key or not payee:
+            flash("Enter a raw payee and a display name.", "error")
+            return redirect(url_for("index", tab="categories"))
+        db.upsert_payee_alias(conn, key, payee)
+        flash(f"Payee “{key}” → {payee}.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/payee-aliases/<path:key>/edit")
+    def edit_payee_alias(key: str):
+        conn = db.connect()
+        db.init(conn)
+        raw = (request.form.get("raw") or "").strip()
+        payee = (request.form.get("payee") or "").strip()
+        if not raw or not payee:
+            flash("Enter a raw payee and a display name.", "error")
+            return redirect(url_for("index", tab="categories"))
+        new_key = merchant_key(raw)
+        if not new_key:
+            flash("Enter a raw payee and a display name.", "error")
+            return redirect(url_for("index", tab="categories"))
+        if not db.update_payee_alias(conn, key, payee, new_key=new_key):
+            flash("That payee mapping is gone.", "error")
+        else:
+            flash(f"Updated “{new_key}” → {payee}.", "success")
+        return redirect(url_for("index", tab="categories"))
+
+    @app.post("/payee-aliases/<path:key>/delete")
+    def delete_payee_alias(key: str):
+        conn = db.connect()
+        db.init(conn)
+        if not db.delete_payee_alias(conn, key):
+            flash("That payee mapping is gone.", "error")
+        else:
+            flash(f"Removed “{key}”.", "success")
+        return redirect(url_for("index", tab="categories"))
+
     @app.post("/categories/reapply")
     def reapply_categories():
         conn = db.connect()
         db.init(conn)
         _flash_reapply_stats(apply_category_rules(conn))
         return redirect(url_for("index", tab="categories"))
-
     @app.post("/expenses")
     def add_expense():
         conn = db.connect()
@@ -873,6 +956,8 @@ def create_app() -> Flask:
             category_source=CATEGORY_USER if category else None,
             note=note,
         )
+        if existing.description and description != existing.description:
+            remember_payee_alias(conn, existing.description, description)
         if category:
             remember_merchant_category(conn, description, category)
         flash(f"Updated {format_inr(amount)} — {description}.", "success")

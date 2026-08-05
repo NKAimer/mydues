@@ -323,6 +323,55 @@ def remember_merchant_category(
     conn.commit()
 
 
+def apply_payee_alias(conn: sqlite3.Connection, description: str) -> str:
+    """Replace a raw extracted payee with a remembered display name when known."""
+    key = merchant_key(description)
+    if not key:
+        return description
+    row = conn.execute(
+        "SELECT payee FROM payee_aliases WHERE raw_key = ?", (key,)
+    ).fetchone()
+    if row and (row["payee"] or "").strip():
+        return (row["payee"] or "").strip()
+
+    best_key = ""
+    best_payee: str | None = None
+    for stored in conn.execute("SELECT raw_key, payee FROM payee_aliases"):
+        stored_key = stored["raw_key"] or ""
+        payee = (stored["payee"] or "").strip()
+        if not stored_key or not payee:
+            continue
+        if not _merchant_key_matches(stored_key, key):
+            continue
+        if len(stored_key) > len(best_key):
+            best_key = stored_key
+            best_payee = payee
+    return best_payee if best_payee else description
+
+
+def remember_payee_alias(
+    conn: sqlite3.Connection, old_description: str, new_payee: str
+) -> None:
+    """Remember that ``old_description`` should display as ``new_payee``."""
+    key = merchant_key(old_description)
+    payee = (new_payee or "").strip()
+    if not key or not payee:
+        return
+    if merchant_key(payee) == key:
+        return
+    conn.execute(
+        """
+        INSERT INTO payee_aliases (raw_key, payee, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT (raw_key) DO UPDATE SET
+            payee = excluded.payee,
+            updated_at = excluded.updated_at
+        """,
+        (key, payee, datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+
+
 def category_spend_totals(items: Iterable) -> list[tuple[str, float]]:
     """Debit spend by category, largest first. Blank category → Uncategorized.
 

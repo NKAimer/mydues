@@ -217,119 +217,247 @@
     </form>
   </section>
 
-  <section class="panel">
-    <h2>Phrase rules</h2>
-    <p class="sub">Substring matches applied after learned merchants. Edit or delete any rule to change how merchants are categorised.</p>
-    {% if category_phrases %}
-      <table class="expense-table">
-        <thead>
-          <tr>
-            <th>Phrase</th>
-            <th>Category</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in category_phrases %}
-            <tr>
-              <td>{{ row.phrase }}</td>
-              <td>{{ row.category }}</td>
-              <td class="expense-actions">
-                <details class="expense-edit">
-                  <summary class="btn subtle">Edit</summary>
-                  <form method="post" action="{{ url_for('edit_category_phrase', phrase_id=row.id) }}" class="grid-form">
-                    <label>Phrase
-                      <input type="text" name="phrase" value="{{ row.phrase }}" required>
-                    </label>
-                    <label>Category
-                      <input type="text" name="category" list="known-categories"
-                             value="{{ row.category }}" required>
-                    </label>
-                    <button class="btn primary" type="submit">Save</button>
-                  </form>
-                </details>
-                <form method="post" action="{{ url_for('delete_category_phrase', phrase_id=row.id) }}"
-                      onsubmit="return confirm('Delete this phrase rule?')">
-                  <button class="btn danger" type="submit">Delete</button>
-                </form>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="empty">No phrase rules.</p>
-    {% endif %}
+  <div class="category-toggles">
+    <button type="button" class="btn subtle" data-category-expand>Expand all</button>
+    <button type="button" class="btn subtle" data-category-collapse>Collapse all</button>
+  </div>
 
-    <h3 class="section-subhead">Add phrase</h3>
-    <form method="post" action="{{ url_for('add_category_phrase') }}" class="grid-form">
-      <label>Phrase
-        <input type="text" name="phrase" placeholder="e.g. cafe" required>
-      </label>
-      <label>Category
-        <input type="text" name="category" list="known-categories"
-               placeholder="Food & dining" required>
-      </label>
-      <button class="btn primary" type="submit">Add phrase</button>
-    </form>
+  <section class="panel">
+    <details class="category-section" open>
+      <summary><h2>Phrase rules <span class="count">{{ category_phrases | length }}</span></h2></summary>
+      <p class="sub">Substring matches applied after learned merchants. Edit or delete any rule to change how merchants are categorised.</p>
+      {% if category_phrases %}
+        <table class="expense-table">
+          <thead>
+            <tr>
+              <th>Phrase</th>
+              <th>Category</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in category_phrases %}
+              <tr>
+                <td>{{ row.phrase }}</td>
+                <td>{{ row.category }}</td>
+                <td class="expense-actions">
+                  <details class="expense-edit">
+                    <summary class="btn subtle">Edit</summary>
+                    <form method="post" action="{{ url_for('edit_category_phrase', phrase_id=row.id) }}" class="grid-form">
+                      <label>Phrase
+                        <input type="text" name="phrase" value="{{ row.phrase }}" required>
+                      </label>
+                      <label>Category
+                        <input type="text" name="category" list="known-categories"
+                               value="{{ row.category }}" required>
+                      </label>
+                      <button class="btn primary" type="submit">Save</button>
+                    </form>
+                  </details>
+                  <form method="post" action="{{ url_for('delete_category_phrase', phrase_id=row.id) }}"
+                        onsubmit="return confirm('Delete this phrase rule?')">
+                    <button class="btn danger" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No phrase rules.</p>
+      {% endif %}
+
+      <h3 class="section-subhead">Add phrase</h3>
+      <form method="post" action="{{ url_for('add_category_phrase') }}" class="grid-form">
+        <label>Phrase
+          <input type="text" name="phrase" placeholder="e.g. cafe" required>
+        </label>
+        <label>Category
+          <input type="text" name="category" list="known-categories"
+                 placeholder="Food & dining" required>
+        </label>
+        <button class="btn primary" type="submit">Add phrase</button>
+      </form>
+    </details>
   </section>
 
   <section class="panel">
-    <h2>Learned merchants</h2>
-    <p class="sub">Merchant keys remembered when you set a category on an expense or transaction. A short distinctive fragment is enough (e.g. <code>apollo</code>).</p>
-    {% if merchant_category_rows %}
-      <table class="expense-table">
-        <thead>
-          <tr>
-            <th>Merchant</th>
-            <th>Category</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in merchant_category_rows %}
+    <details class="category-section">
+      <summary><h2>Learned merchants <span class="count">{{ merchant_category_rows | length }}</span></h2></summary>
+      <p class="sub">Merchant keys remembered when you set a category on an expense or transaction. A short distinctive fragment is enough (e.g. <code>apollo</code>).</p>
+      {% if merchant_category_rows %}
+        <table class="expense-table">
+          <thead>
             <tr>
-              <td>{{ row.merchant_key }}</td>
-              <td>{{ row.category }}</td>
-              <td class="expense-actions">
-                <details class="expense-edit">
-                  <summary class="btn subtle">Edit</summary>
-                  <form method="post" action="{{ url_for('edit_merchant_category', key=row.merchant_key) }}" class="grid-form">
-                    <label>Merchant
-                      <input type="text" name="merchant" value="{{ row.merchant_key }}" required>
-                    </label>
-                    <label>Category
-                      <input type="text" name="category" list="known-categories"
-                             value="{{ row.category }}" required>
-                    </label>
-                    <button class="btn primary" type="submit">Save</button>
-                  </form>
-                </details>
-                <form method="post" action="{{ url_for('delete_merchant_category', key=row.merchant_key) }}"
-                      onsubmit="return confirm('Delete this merchant mapping?')">
-                  <button class="btn danger" type="submit">Delete</button>
-                </form>
-              </td>
+              <th>Merchant</th>
+              <th>Category</th>
+              <th></th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    {% else %}
-      <p class="empty">No learned merchants yet.</p>
-    {% endif %}
+          </thead>
+          <tbody>
+            {% for row in merchant_category_rows %}
+              <tr>
+                <td>{{ row.merchant_key }}</td>
+                <td>{{ row.category }}</td>
+                <td class="expense-actions">
+                  <details class="expense-edit">
+                    <summary class="btn subtle">Edit</summary>
+                    <form method="post" action="{{ url_for('edit_merchant_category', key=row.merchant_key) }}" class="grid-form">
+                      <label>Merchant
+                        <input type="text" name="merchant" value="{{ row.merchant_key }}" required>
+                      </label>
+                      <label>Category
+                        <input type="text" name="category" list="known-categories"
+                               value="{{ row.category }}" required>
+                      </label>
+                      <button class="btn primary" type="submit">Save</button>
+                    </form>
+                  </details>
+                  <form method="post" action="{{ url_for('delete_merchant_category', key=row.merchant_key) }}"
+                        onsubmit="return confirm('Delete this merchant mapping?')">
+                    <button class="btn danger" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No learned merchants yet.</p>
+      {% endif %}
 
-    <h3 class="section-subhead">Add merchant</h3>
-    <form method="post" action="{{ url_for('add_merchant_category') }}" class="grid-form">
-      <label>Merchant
-        <input type="text" name="merchant" placeholder="e.g. SWIGGY BANGALORE" required>
-      </label>
-      <label>Category
-        <input type="text" name="category" list="known-categories"
-               placeholder="Food & dining" required>
-      </label>
-      <button class="btn primary" type="submit">Add merchant</button>
-    </form>
+      <h3 class="section-subhead">Add merchant</h3>
+      <form method="post" action="{{ url_for('add_merchant_category') }}" class="grid-form">
+        <label>Merchant
+          <input type="text" name="merchant" placeholder="e.g. SWIGGY BANGALORE" required>
+        </label>
+        <label>Category
+          <input type="text" name="category" list="known-categories"
+                 placeholder="Food & dining" required>
+        </label>
+        <button class="btn primary" type="submit">Add merchant</button>
+      </form>
+    </details>
   </section>
+
+  <section class="panel">
+    <details class="category-section">
+      <summary><h2>Payee cues <span class="count">{{ payee_cues | length }}</span></h2></summary>
+      <p class="sub">Lead-in text that marks the payee in alert emails (e.g. <code>Merchant Name:</code>). Used on the next fetch or Gmail refresh.</p>
+      {% if payee_cues %}
+        <table class="expense-table">
+          <thead>
+            <tr>
+              <th>Cue</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payee_cues %}
+              <tr>
+                <td>{{ row.cue }}</td>
+                <td class="expense-actions">
+                  <details class="expense-edit">
+                    <summary class="btn subtle">Edit</summary>
+                    <form method="post" action="{{ url_for('edit_payee_cue', cue_id=row.id) }}" class="grid-form">
+                      <label>Cue
+                        <input type="text" name="cue" value="{{ row.cue }}" required>
+                      </label>
+                      <button class="btn primary" type="submit">Save</button>
+                    </form>
+                  </details>
+                  <form method="post" action="{{ url_for('delete_payee_cue', cue_id=row.id) }}"
+                        onsubmit="return confirm('Delete this payee cue?')">
+                    <button class="btn danger" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No payee cues.</p>
+      {% endif %}
+
+      <h3 class="section-subhead">Add cue</h3>
+      <form method="post" action="{{ url_for('add_payee_cue') }}" class="grid-form">
+        <label>Cue
+          <input type="text" name="cue" placeholder="e.g. merchant name:" required>
+        </label>
+        <button class="btn primary" type="submit">Add cue</button>
+      </form>
+    </details>
+  </section>
+
+  <section class="panel">
+    <details class="category-section">
+      <summary><h2>Payee names <span class="count">{{ payee_aliases | length }}</span></h2></summary>
+      <p class="sub">Rename messy extracted payees for display (e.g. <code>myntra desi</code> → <code>Myntra</code>). Also learned when you edit an expense description.</p>
+      {% if payee_aliases %}
+        <table class="expense-table">
+          <thead>
+            <tr>
+              <th>Raw</th>
+              <th>Display name</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in payee_aliases %}
+              <tr>
+                <td>{{ row.raw_key }}</td>
+                <td>{{ row.payee }}</td>
+                <td class="expense-actions">
+                  <details class="expense-edit">
+                    <summary class="btn subtle">Edit</summary>
+                    <form method="post" action="{{ url_for('edit_payee_alias', key=row.raw_key) }}" class="grid-form">
+                      <label>Raw
+                        <input type="text" name="raw" value="{{ row.raw_key }}" required>
+                      </label>
+                      <label>Display name
+                        <input type="text" name="payee" value="{{ row.payee }}" required>
+                      </label>
+                      <button class="btn primary" type="submit">Save</button>
+                    </form>
+                  </details>
+                  <form method="post" action="{{ url_for('delete_payee_alias', key=row.raw_key) }}"
+                        onsubmit="return confirm('Delete this payee name?')">
+                    <button class="btn danger" type="submit">Delete</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">No payee renames yet.</p>
+      {% endif %}
+
+      <h3 class="section-subhead">Add payee name</h3>
+      <form method="post" action="{{ url_for('add_payee_alias') }}" class="grid-form">
+        <label>Raw
+          <input type="text" name="raw" placeholder="e.g. MYNTRA DESI" required>
+        </label>
+        <label>Display name
+          <input type="text" name="payee" placeholder="Myntra" required>
+        </label>
+        <button class="btn primary" type="submit">Add payee name</button>
+      </form>
+    </details>
+  </section>
+
+  <script>
+    (function () {
+      var sections = document.querySelectorAll("details.category-section");
+      if (!sections.length) return;
+      document.querySelector("[data-category-expand]")?.addEventListener("click", function () {
+        sections.forEach(function (el) { el.open = true; });
+      });
+      document.querySelector("[data-category-collapse]")?.addEventListener("click", function () {
+        sections.forEach(function (el) { el.open = false; });
+      });
+    })();
+  </script>
 
   {% else %}
 
