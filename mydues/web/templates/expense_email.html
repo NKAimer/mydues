@@ -20,6 +20,16 @@
     </div>
   </header>
 
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="flashes">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
   <section class="panel email-view">
     <p class="email-meta">
       <strong>{{ subject }}</strong>
@@ -36,6 +46,37 @@
     </p>
     <pre class="email-body">{{ body }}</pre>
   </section>
+
+  {% if can_teach %}
+  <section class="panel teach-panel">
+    <h2>Teach from this email</h2>
+    <p class="sub">Current description: <strong>{{ expense.description }}</strong></p>
+
+    <form method="post" action="{{ url_for('teach_expense', expense_id=expense.id) }}" class="grid-form">
+      <input type="hidden" name="action" value="cue">
+      <label>Payee cue
+        <input type="text" name="cue" placeholder="Merchant Name:" required>
+      </label>
+      <button class="btn" type="submit">Save cue</button>
+    </form>
+
+    <form method="post" action="{{ url_for('teach_expense', expense_id=expense.id) }}" class="grid-form">
+      <input type="hidden" name="action" value="alias">
+      <label>Raw payee
+        <input type="text" name="raw" value="{{ expense.description }}" required>
+      </label>
+      <label>Display as
+        <input type="text" name="payee" placeholder="Friendly name" required>
+      </label>
+      <button class="btn" type="submit">Save alias</button>
+    </form>
+
+    <form method="post" action="{{ url_for('teach_expense', expense_id=expense.id) }}">
+      <input type="hidden" name="action" value="reparse">
+      <button class="btn primary" type="submit">Reparse this message</button>
+    </form>
+  </section>
+  {% endif %}
 
   <footer>
     <span>Everything stays on this machine. Gmail access is read-only.

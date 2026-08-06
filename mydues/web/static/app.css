@@ -298,6 +298,8 @@ h2 { font-size: 19px; }
 
 .freshness { margin: 0; font-size: 14px; color: var(--muted); }
 .freshness.stale { color: var(--warn); }
+.last-charge { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.last-charge.quiet { margin-top: 2px; font-size: 12px; opacity: 0.9; }
 
 .badge {
   display: inline-block;
@@ -429,11 +431,13 @@ a.btn { display: inline-block; text-decoration: none; }
 }
 .days-field {
   display: inline-flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 8px;
   color: var(--text);
   font-size: 16px;
   font-weight: 560;
+  white-space: nowrap;
 }
 .days-field input {
   width: 4.5rem;
@@ -481,6 +485,13 @@ code.copyable {
 }
 
 .issues { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.issues-scroll {
+  max-height: min(28rem, 55vh);
+  overflow-y: auto;
+  padding-right: 4px;
+  margin-bottom: 8px;
+  overscroll-behavior: contain;
+}
 .issues li {
   font-size: 15px;
   padding: 12px;
@@ -581,4 +592,257 @@ footer a { color: var(--accent); }
   min-height: 1.2em;
   font-size: 14px;
   color: var(--muted);
+}
+
+/* Tabs stay in normal document flow so they never cover filter
+   controls or month headings while scrolling. */
+html {
+  scroll-padding-top: 16px;
+}
+
+.fetch-stamp {
+  display: block;
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* Budgets */
+.budget-list {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+}
+.budget-row {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.budget-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.budget-figures {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  font-size: 14px;
+}
+.budget-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.budget-fill {
+  height: 100%;
+  background: var(--accent);
+}
+.budget-fill.over,
+.budget-row.over .budget-fill {
+  background: var(--danger);
+}
+.pill.warn {
+  background: color-mix(in srgb, var(--warn) 25%, transparent);
+  color: var(--warn);
+}
+.pill.charge {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+/* Filters / density */
+.filter-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 16px 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--line);
+}
+.filter-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 14px;
+  align-items: flex-end;
+}
+.filter-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 0;
+}
+.filter-fields input[type="search"],
+.filter-fields input[type="text"] {
+  width: 9.5rem;
+  max-width: 100%;
+  min-width: 0;
+}
+.filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin-top: 4px;
+}
+.filter-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+.table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.density-toggle {
+  font-size: 13px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+html[data-table-density="compact"] [data-density-table] th,
+html[data-table-density="compact"] [data-density-table] td {
+  padding: 4px 8px;
+  font-size: 14px;
+}
+html[data-table-density="compact"] .expense-note {
+  display: none;
+}
+
+.export-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  clear: both;
+  position: relative;
+  z-index: 1;
+}
+
+/* Category color dots */
+.cat-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--muted);
+}
+.cat-payment { background: #7a8ca3; }
+.cat-fees { background: #c48a6a; }
+.cat-emi { background: #a07a9a; }
+.cat-cash { background: #6a9a8a; }
+.cat-food { background: #c47a7a; }
+.cat-groceries { background: #7aa86a; }
+.cat-travel { background: #6a8ab8; }
+.cat-fuel { background: #b89a5a; }
+.cat-bills { background: #8a8ab0; }
+.cat-entertainment { background: #9a7ab0; }
+.cat-health { background: #6aaaa0; }
+.cat-shopping { background: #b07a8a; }
+.cat-uncategorized { background: #8b93a7; }
+
+.category-totals li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Coverage / urgency */
+.due-urgency {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.urgency-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  text-decoration: none;
+  font-size: 14px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: var(--surface);
+}
+.urgency-chip.overdue { border-color: var(--danger); color: var(--danger); }
+.urgency-chip.soon { border-color: var(--warn); color: var(--warn); }
+.urgency-chip.week { border-color: var(--accent); color: var(--accent); }
+
+.coverage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.coverage-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.cycle-chip {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 14px;
+}
+.charges-cycle {
+  margin: 8px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.row-highlight {
+  animation: row-flash 1.6s ease;
+}
+@keyframes row-flash {
+  0% { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+  100% { background: transparent; }
+}
+
+.empty-state h2 { margin-top: 0; }
+
+/* Mobile stacked rows */
+@media (max-width: 640px) {
+  .stackable-table thead { display: none; }
+  .stackable-table,
+  .stackable-table tbody,
+  .stackable-table tr,
+  .stackable-table td {
+    display: block;
+    width: 100%;
+  }
+  .stackable-table tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .stackable-table td {
+    padding: 4px 0;
+    border: none;
+  }
+  .stackable-table td::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .stackable-table td.num { text-align: left; }
+  .stackable-table tfoot { display: none; }
 }

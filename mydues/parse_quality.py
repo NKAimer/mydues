@@ -15,6 +15,8 @@ from .models import ParsedStatement, StatementRecord
 # list is fine (settled / credit-only cycles).
 _NONEMPTY_BILL = 1.0
 _TOTAL_DRIFT = 1.0  # rupees
+# "Previous balance"-style stub that must not replace a real bill on reparse.
+_TINY_TOTAL = 1000.0
 
 
 @dataclass(frozen=True)
@@ -82,9 +84,10 @@ def reparse_regression(
     """Why a reparse must not overwrite the stored cycle, or None if acceptable."""
     if abs((previous.total_due or 0.0) - (new.total_due or 0.0)) > _TOTAL_DRIFT:
         # Refuse collapsing a large bill into a tiny previous-balance style total.
+        # Allow correcting absurd misreads (e.g. phone 8250825 → real 1,72,729).
         old = abs(previous.total_due or 0.0)
         new_abs = abs(new.total_due or 0.0)
-        if old >= 500 and new_abs < old * 0.25:
+        if old >= 500 and new_abs < old * 0.25 and new_abs < _TINY_TOTAL:
             return (
                 f"total due collapsed {previous.total_due:.2f} → {new.total_due:.2f}"
             )

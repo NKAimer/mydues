@@ -60,13 +60,12 @@ class HdfcParser(StatementParser):
             return statement
         amount = parse_amount(match.group(1))
         due = parse_date(match.group(2))
-        if amount is not None and (statement.min_due is None or statement.min_due == 0):
+        # Fused Tata Neu / Swiggy row is authoritative — override T&C misreads
+        # (e.g. Toll Free +800 paired with a prose "Minimum Amount Due").
+        if amount is not None:
             statement.min_due = amount
             statement.matched_labels["min_due"] = "Minimum Due"
-        if due is not None and statement.due_date is None:
-            statement.due_date = due
-            statement.matched_labels["due_date"] = "Due Date"
-        elif due is not None and statement.statement_date and due >= statement.statement_date:
+        if due is not None:
             statement.due_date = due
             statement.matched_labels["due_date"] = "Due Date"
         return statement

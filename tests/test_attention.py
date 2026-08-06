@@ -102,15 +102,22 @@ def test_an_unknown_sender_still_lists_the_mail(client, conn):
     assert "with the cardholder" not in page
 
 
-def test_a_long_backlog_is_capped_with_a_count(client, conn):
-    """A first fetch can leave a hundred locked mails; the panel must stay readable."""
+def test_a_long_backlog_is_scrollable_with_full_count(client, conn):
+    """A first fetch can leave many locked mails; the panel lists all and scrolls."""
     for index in range(20):
         log_locked(conn, message_id=f"msg-{index}", filename=f"statement-{index}.pdf")
 
     page = client.get("/").get_data(as_text=True)
 
-    assert page.count("/ingest/retry") == 12
-    assert "showing 12 of 20" in page
+    assert page.count("/ingest/retry") == 20
+    assert "Attachments that need you" in page
+    assert 'class="count">20</span>' in page or ">20</span>" in page
+    assert "showing 12 of" not in page
+    assert "issues-scroll" in page
+    assert "category-section" in page
+    css = open("mydues/web/static/app.css").read()
+    assert "issues-scroll" in css
+    assert "max-height" in css
 
 
 def test_locked_detail_names_the_issuer_that_has_no_card(conn, tmp_path):

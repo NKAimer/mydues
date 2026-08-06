@@ -139,6 +139,11 @@ def _collect_hits(text: str, labels: dict[str, tuple[str, ...]]) -> list[LabelHi
             for match in _label_regex(label).finditer(text):
                 if match.start() > 0 and text[match.start() - 1] == "=":
                     continue
+                # T&C prose uses the same words in lowercase
+                # ("…less than the total amount due is paid…") and must not
+                # become a fake label row that pairs with a phone number.
+                if match.group(0).islower():
+                    continue
                 raw.append((field, label, match.start(), match.end()))
 
     raw.sort(key=lambda item: (item[2], -(item[3] - item[2])))

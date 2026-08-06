@@ -49,6 +49,63 @@ def test_reparse_refuses_txn_collapse(conn):
     assert "collapsed" in detail
 
 
+def test_reparse_allows_fixing_phone_number_total():
+    """8250825 (ERGO Toll Free) → real bill must not trip the collapse guard."""
+    from mydues.models import Transaction
+
+    previous = StatementRecord(
+        card_id=1,
+        total_due=8250825.0,
+        min_due=800.0,
+        due_date=date(2026, 5, 21),
+        statement_date=date(2026, 5, 1),
+        source=SOURCE_STATEMENT,
+        source_ref="msg-phone",
+        as_of=datetime(2026, 5, 2),
+    )
+    fixed = ParsedStatement(
+        total_due=172729.0,
+        min_due=8640.0,
+        due_date=date(2026, 5, 21),
+        statement_date=date(2026, 5, 1),
+        last4="2750",
+        issuer="hdfc",
+        transactions=[
+            Transaction(description=f"t{i}", amount=10.0, txn_date=date(2026, 4, 3))
+            for i in range(8)
+        ],
+    )
+    assert parse_quality.reparse_regression(
+        previous, previous_txn_count=8, new=fixed
+    ) is None
+
+
+def test_reparse_refuses_real_bill_to_stub_total():
+    previous = StatementRecord(
+        card_id=1,
+        total_due=12000.0,
+        min_due=500.0,
+        due_date=date(2026, 8, 1),
+        statement_date=date(2026, 7, 12),
+        source=SOURCE_STATEMENT,
+        as_of=datetime(2026, 7, 13),
+    )
+    stub = ParsedStatement(
+        total_due=200.0,
+        min_due=6.0,
+        due_date=date(2026, 8, 1),
+        statement_date=date(2026, 7, 12),
+        last4="8765",
+        issuer="hdfc",
+        transactions=[],
+    )
+    reason = parse_quality.reparse_regression(
+        previous, previous_txn_count=2, new=stub
+    )
+    assert reason is not None
+    assert "collapsed" in reason
+
+
 def test_undated_junk_does_not_outrank_a_real_cycle(conn):
     card = Card(issuer="yesbank", label="YES Bank ••2653", last4="2653")
     card.id = db.add_card(conn, card)

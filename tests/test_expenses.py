@@ -586,3 +586,232 @@ def test_show_email_requires_gmail_source(client, conn):
     )
     response = client.get(f"/expenses/{expense_id}/email", follow_redirects=True)
     assert "not imported from Gmail" in response.get_data(as_text=True)
+
+
+def test_list_expenses_filters_q_category_amount(conn):
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=100,
+            description="SWIGGY lunch",
+            category="Food & dining",
+            note="bangalore",
+            source=SOURCE_MANUAL,
+        ),
+    )
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 2),
+            amount=500,
+            description="UBER trip",
+            category="Travel",
+            source=SOURCE_MANUAL,
+        ),
+    )
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 3),
+            amount=50,
+            description="Coffee",
+            category="Food & dining",
+            source=SOURCE_MANUAL,
+        ),
+    )
+
+    start, end = date(2026, 8, 1), date(2026, 9, 1)
+    by_q = db.list_expenses(conn, start=start, end=end, q="swiggy")
+    assert len(by_q) == 1
+    assert "SWIGGY" in by_q[0].description.upper()
+
+    by_note = db.list_expenses(conn, start=start, end=end, q="BANGALORE")
+    assert len(by_note) == 1
+
+    assert db.list_expenses(conn, start=start, end=end, q="nomatch") == []
+
+    food = db.list_expenses(conn, start=start, end=end, category="Food & dining")
+    assert len(food) == 2
+
+    mid = db.list_expenses(conn, start=start, end=end, min_amount=100, max_amount=100)
+    assert len(mid) == 1
+    assert mid[0].amount == pytest.approx(100)
+
+    combined = db.list_expenses(
+        conn, start=start, end=end, q="swiggy", category="Food & dining"
+    )
+    assert len(combined) == 1
+
+    # Blank q is ignored (no LIKE %%)
+    assert len(db.list_expenses(conn, start=start, end=end, q="  ")) == 3
+
+
+def test_export_expenses_csv_and_json(client, conn):
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=250.5,
+            description="SWIGGY",
+            category="Food & dining",
+            source=SOURCE_MANUAL,
+            note="keep",
+        ),
+    )
+    csv_resp = client.get("/export/expenses.csv?month=2026-08")
+    assert csv_resp.status_code == 200
+    assert csv_resp.mimetype == "text/csv"
+    assert "attachment" in csv_resp.headers.get("Content-Disposition", "")
+    text = csv_resp.get_data(as_text=True)
+    assert "spent_on,amount,description" in text.replace(" ", "") or "spent_on" in text
+    assert "01/08/2026" in text
+    assert "250.5" in text
+    assert "source_ref" not in text
+    assert "body" not in text.lower() or "SWIGGY" in text
+
+    json_resp = client.get("/export/expenses.json?month=2026-08&q=swiggy")
+    assert json_resp.status_code == 200
+    assert json_resp.mimetype == "application/json"
+    payload = json_resp.get_json()
+    assert payload["month"] == "2026-08"
+    assert len(payload["expenses"]) == 1
+    assert payload["expenses"][0]["spent_on"] == "2026-08-01"
+    assert "source_ref" not in payload["expenses"][0]
+
+
+def test_filter_query_params_round_trip_on_expenses(client, conn):
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=100,
+            description="SWIGGY",
+            category="Food & dining",
+            source=SOURCE_MANUAL,
+        ),
+    )
+    page = client.get(
+        "/?tab=expenses&month=2026-08&q=swiggy&category=Food+%26+dining"
+    ).get_data(as_text=True)
+    assert 'name="q"' in page
+    assert "swiggy" in page
+    assert 'name="category"' in page
+    assert "Food &amp; dining" in page or "Food & dining" in page
+    assert "Charges only" not in page
+    assert 'name="charges"' not in page
+
+
+def test_teach_cue_alias_and_reparse(client, conn, monkeypatch):
+    from mydues import gmail
+
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=433.0,
+            description="RAW MERCHANT",
+            source=SOURCE_GMAIL,
+            source_ref="msg-teach-1",
+        ),
+    )
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+
+    page = client.post(
+        f"/expenses/{expense_id}/teach",
+        data={"action": "cue", "cue": "Merchant Name:"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "Payee cue" in page or "saved" in page.lower() or "cue" in page.lower()
+    cues = [row["cue"] for row in db.list_payee_cues(conn)]
+    assert "merchant name:" in cues
+
+    # Duplicate cue upserts cleanly
+    client.post(
+        f"/expenses/{expense_id}/teach",
+        data={"action": "cue", "cue": "Merchant Name:"},
+        follow_redirects=True,
+    )
+    assert cues.count("merchant name:") >= 1 or "merchant name:" in [
+        row["cue"] for row in db.list_payee_cues(conn)
+    ]
+
+    client.post(
+        f"/expenses/{expense_id}/teach",
+        data={"action": "alias", "raw": "RAW MERCHANT", "payee": "Friendly Shop"},
+        follow_redirects=True,
+    )
+    aliases = {row["raw_key"]: row["payee"] for row in db.list_payee_aliases(conn)}
+    assert any(v == "Friendly Shop" for v in aliases.values())
+
+    message = gmail.Message(
+        id="msg-teach-1",
+        sender="alerts@hdfcbank.net",
+        subject="Transaction Alert: Rs.433 spent",
+        internal_date=int(datetime(2026, 8, 1, 10, 0).timestamp() * 1000),
+        body="Rs. 433.00 spent at RAW MERCHANT on 01-08-2026 using your card.",
+    )
+    monkeypatch.setattr(gmail, "service", lambda **_: object())
+    monkeypatch.setattr(gmail, "get_message", lambda *_a, **_k: message)
+
+    client.post(
+        f"/expenses/{expense_id}/teach",
+        data={"action": "reparse"},
+        follow_redirects=True,
+    )
+    updated = db.get_expense(conn, expense_id)
+    assert updated is not None
+    assert updated.amount == pytest.approx(433.0)
+    assert "Friendly Shop" in updated.description or updated.description
+
+
+def test_teach_reparse_without_gmail_leaves_expense(client, conn, monkeypatch):
+    from mydues import gmail
+
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=100.0,
+            description="Keep me",
+            source=SOURCE_GMAIL,
+            source_ref="msg-x",
+        ),
+    )
+    monkeypatch.setattr(gmail, "is_connected", lambda: False)
+    page = client.post(
+        f"/expenses/{expense_id}/teach",
+        data={"action": "reparse"},
+        follow_redirects=True,
+    ).get_data(as_text=True)
+    assert "Connect Gmail" in page or "gmail" in page.lower()
+    assert db.get_expense(conn, expense_id).description == "Keep me"
+
+
+def test_teach_controls_on_email_view(client, conn, monkeypatch):
+    from mydues import gmail
+
+    expense_id = db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=10.0,
+            description="Shop",
+            source=SOURCE_GMAIL,
+            source_ref="msg-1",
+        ),
+    )
+    message = gmail.Message(
+        id="msg-1",
+        sender="a@b.com",
+        subject="Alert",
+        internal_date=int(datetime(2026, 8, 1).timestamp() * 1000),
+        body="Rs. 10 spent at Shop",
+    )
+    monkeypatch.setattr(gmail, "is_connected", lambda: True)
+    monkeypatch.setattr(gmail, "service", lambda **_: object())
+    monkeypatch.setattr(gmail, "get_message", lambda *_a, **_k: message)
+    page = client.get(f"/expenses/{expense_id}/email").get_data(as_text=True)
+    assert "Save cue" in page
+    assert "Save alias" in page
+    assert "Reparse this message" in page

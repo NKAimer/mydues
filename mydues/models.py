@@ -52,6 +52,7 @@ class Transaction:
     kind: str = KIND_DEBIT
     category: str | None = None
     category_source: str | None = None
+    charge_kind: str | None = None
     id: int | None = None
 
     @property
@@ -122,6 +123,7 @@ class Expense:
     id: int | None = None
     category: str | None = None
     category_source: str | None = None
+    charge_kind: str | None = None
     source_ref: str | None = None
     note: str | None = None
     created_at: datetime | None = None

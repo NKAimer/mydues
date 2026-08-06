@@ -197,3 +197,73 @@ def test_a_statement_with_no_readable_line_items_shows_no_table(client, conn, ca
     page = client.get("/").get_data(as_text=True)
 
     assert "Show transactions" not in page
+
+
+def test_transactions_for_statement_filters(conn, card):
+    from datetime import date, datetime
+
+    from mydues.models import KIND_DEBIT, SOURCE_STATEMENT, StatementRecord, Transaction
+
+    sid = db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=card.id,
+            total_due=1000,
+            statement_date=date(2026, 8, 1),
+            source=SOURCE_STATEMENT,
+            as_of=datetime.now(),
+        ),
+    )
+    db.save_transactions(
+        conn,
+        card.id,
+        sid,
+        [
+            Transaction(description="SWIGGY", amount=200, kind=KIND_DEBIT, category="Food & dining"),
+            Transaction(description="Annual fee", amount=500, kind=KIND_DEBIT),
+            Transaction(description="UBER", amount=100, kind=KIND_DEBIT, category="Travel"),
+        ],
+    )
+    assert len(db.transactions_for_statement(conn, sid, q="swiggy")) == 1
+    assert len(db.transactions_for_statement(conn, sid, category="Travel")) == 1
+    assert len(db.transactions_for_statement(conn, sid, min_amount=200, max_amount=200)) == 1
+    charges = db.transactions_for_statement(conn, sid, charges_only=True)
+    assert len(charges) == 1
+    assert charges[0].charge_kind == "annual_fee"
+
+
+def test_export_statement_transactions(client, conn, card):
+    from datetime import date, datetime
+
+    from mydues.models import KIND_DEBIT, SOURCE_STATEMENT, StatementRecord, Transaction
+
+    sid = db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=card.id,
+            total_due=1000,
+            statement_date=date(2026, 8, 1),
+            source=SOURCE_STATEMENT,
+            as_of=datetime.now(),
+        ),
+    )
+    db.save_transactions(
+        conn,
+        card.id,
+        sid,
+        [Transaction(description="SWIGGY", amount=200, kind=KIND_DEBIT, txn_date=date(2026, 8, 2))],
+    )
+    missing = client.get("/export/statement/99999/transactions.csv")
+    assert missing.status_code == 404
+
+    csv_resp = client.get(f"/export/statement/{sid}/transactions.csv")
+    assert csv_resp.status_code == 200
+    assert csv_resp.mimetype == "text/csv"
+    assert "02/08/2026" in csv_resp.get_data(as_text=True)
+
+    json_resp = client.get(f"/export/statement/{sid}/transactions.json")
+    assert json_resp.status_code == 200
+    payload = json_resp.get_json()
+    assert payload["statement_id"] == sid
+    assert len(payload["transactions"]) == 1
+    assert payload["transactions"][0]["txn_date"] == "2026-08-02"

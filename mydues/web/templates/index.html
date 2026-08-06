@@ -79,10 +79,20 @@
 
   {% if tab == 'expenses' %}
 
+  {% if not gmail_connected %}
+  <section class="panel empty-state">
+    <h2>Connect Gmail to fetch expense alerts</h2>
+    <p class="sub">Or add expenses by hand below. Alerts stay on this machine.</p>
+    <p><a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a></p>
+  </section>
+  {% endif %}
+
   {% if gmail_connected %}
-  <section class="panel expense-fetch-panel">
+  <section class="panel expense-fetch-panel" id="fetch-expenses">
     <h2>Fetch expense alerts</h2>
-    <p class="sub">Pull spend alerts from Gmail for the lookback window below.</p>
+    <p class="sub">Pull spend alerts from Gmail for the lookback window below.
+      <span class="fetch-stamp">Expenses last fetched {{ expenses_fetched }}</span>
+    </p>
     <form method="post" action="{{ url_for('fetch_expenses') }}" class="js-progress-form expense-fetch" data-job="expenses" data-title="Fetching expense alerts">
       <label class="days-field">Look back
         <input type="number" name="days" value="7" min="1" max="400" inputmode="numeric" required aria-label="Number of days to look back">
@@ -97,15 +107,63 @@
     <div class="stat">
       <span class="stat-label">Spent in {{ expense_month_label }}</span>
       <span class="stat-value">{{ expense_total | inr }}</span>
-      <span class="stat-foot">{{ expenses | length }} entr{{ 'y' if expenses|length == 1 else 'ies' }}</span>
+      <span class="stat-foot">{{ expenses | length }} entr{{ 'y' if expenses|length == 1 else 'ies' }}{% if filters %} (filtered){% endif %}</span>
       {% if expense_category_totals %}
         <ul class="category-totals">
           {% for label, amount in expense_category_totals %}
-            <li><span class="cat-label">{{ label }}</span> <span class="cat-amount">{{ amount | inr }}</span></li>
+            <li>
+              <span class="cat-dot {{ category_colors.get(label, 'cat-uncategorized') }}" aria-hidden="true"></span>
+              <span class="cat-label">{{ label }}</span>
+              <span class="cat-amount">{{ amount | inr }}</span>
+            </li>
           {% endfor %}
         </ul>
       {% endif %}
+      <p class="export-links">
+        <a class="btn subtle" href="{{ url_for('export_expenses_csv', month=expense_month_key, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export CSV</a>
+        <a class="btn subtle" href="{{ url_for('export_expenses_json', month=expense_month_key, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export JSON</a>
+      </p>
     </div>
+  </section>
+
+  <section class="panel" id="budgets">
+    <h2>Budgets</h2>
+    <p class="sub">Monthly limits for {{ expense_month_label }} (calendar month).</p>
+    {% if budgets %}
+      <ul class="budget-list">
+        {% for row in budgets %}
+          <li class="budget-row{{ ' over' if row.over }}">
+            <div class="budget-head">
+              <span class="cat-dot {{ category_colors.get(row.category, 'cat-uncategorized') }}" aria-hidden="true"></span>
+              <span class="cat-label">{{ row.category }}</span>
+              <span class="budget-figures">{{ row.spent | inr }} / {{ row.amount_limit | inr }}</span>
+              {% if row.over %}<span class="pill warn">Over</span>{% endif %}
+            </div>
+            <div class="budget-bar" role="progressbar" aria-valuenow="{{ row.pct }}" aria-valuemin="0" aria-valuemax="100">
+              <div class="budget-fill{{ ' over' if row.over }}" style="width: {{ row.pct }}%"></div>
+            </div>
+            <form method="post" action="{{ url_for('delete_budget') }}" class="inline-delete"
+                  onsubmit="return confirm('Remove budget for {{ row.category }}?')">
+              <input type="hidden" name="category" value="{{ row.category }}">
+              <input type="hidden" name="month" value="{{ expense_month_key }}">
+              <button class="btn subtle" type="submit">Remove</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No budgets yet. Set a monthly limit below.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('upsert_budget') }}" class="grid-form budget-form">
+      <input type="hidden" name="month" value="{{ expense_month_key }}">
+      <label>Category
+        <input type="text" name="category" list="known-categories" required placeholder="e.g. Food & dining">
+      </label>
+      <label>Monthly limit
+        <input type="text" name="amount_limit" inputmode="decimal" required placeholder="0.00">
+      </label>
+      <button class="btn primary" type="submit">Save budget</button>
+    </form>
   </section>
 
   <section class="panel expenses-month">
@@ -115,9 +173,43 @@
       <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_next_month) }}">Next →</a>
     </div>
     <p class="sub">Descriptions come from the alert text. If a row looks like boilerplate, use Refresh descriptions from Gmail.</p>
+    <p class="fetch-stamp">Expenses last fetched {{ expenses_fetched }}</p>
+
+    <form method="get" action="{{ url_for('index') }}" class="filter-row">
+      <input type="hidden" name="tab" value="expenses">
+      <input type="hidden" name="month" value="{{ expense_month_key }}">
+      <div class="filter-fields">
+        <label>Search
+          <input type="search" name="q" value="{{ filter_q }}" placeholder="Description or note">
+        </label>
+        <label>Category
+          <input type="text" name="category" list="known-categories" value="{{ filter_category }}" placeholder="Any">
+        </label>
+        <label>Min
+          <input type="text" name="min_amount" inputmode="decimal" value="{{ filter_min if filter_min is not none else '' }}" placeholder="0">
+        </label>
+        <label>Max
+          <input type="text" name="max_amount" inputmode="decimal" value="{{ filter_max if filter_max is not none else '' }}" placeholder="∞">
+        </label>
+      </div>
+      <div class="filter-toolbar">
+        <span class="filter-actions">
+          <button class="btn" type="submit">Filter</button>
+          {% if filters %}
+            <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">Clear</a>
+          {% endif %}
+        </span>
+        <label class="density-toggle">Density
+          <select data-density-select aria-label="Table density">
+            <option value="comfortable">Comfortable</option>
+            <option value="compact">Compact</option>
+          </select>
+        </label>
+      </div>
+    </form>
 
     {% if expenses %}
-      <table class="expense-table">
+      <table class="expense-table stackable-table" data-density-table>
         <thead>
           <tr>
             <th>Date</th>
@@ -129,21 +221,26 @@
         </thead>
         <tbody>
           {% for expense in expenses %}
-            <tr>
-              <td>{{ expense.spent_on | dmy }}</td>
-              <td>
+            <tr id="expense-{{ expense.id }}" class="{{ 'row-highlight' if highlight == 'expense-' ~ expense.id }}">
+              <td data-label="Date">{{ expense.spent_on | dmy }}</td>
+              <td data-label="Description">
                 {{ expense.description }}
                 {% if expense.source == 'gmail' %}<span class="pill muted">gmail</span>{% endif %}
                 {% if expense.note and expense.note != expense.description %}
                   <div class="expense-note">{{ expense.note }}</div>
                 {% endif %}
               </td>
-              <td>{{ expense.category or '—' }}</td>
-              <td class="num">{{ expense.amount | inr }}</td>
+              <td data-label="Category">
+                {% if expense.category %}
+                  <span class="cat-dot {{ category_colors.get(expense.category, 'cat-uncategorized') }}" aria-hidden="true"></span>
+                  {{ expense.category }}
+                {% else %}—{% endif %}
+              </td>
+              <td class="num" data-label="Amount">{{ expense.amount | inr }}</td>
               <td class="expense-actions">
-                <details class="expense-edit">
+                <details class="expense-edit" data-edit-panel>
                   <summary class="btn subtle">Edit</summary>
-                  <form method="post" action="{{ url_for('edit_expense', expense_id=expense.id) }}" class="grid-form">
+                  <form method="post" action="{{ url_for('edit_expense', expense_id=expense.id) }}" class="grid-form" data-edit-form>
                     <label>Date
                       <input type="text" name="spent_on" inputmode="numeric"
                              value="{{ expense.spent_on | dmy }}"
@@ -154,7 +251,7 @@
                              value="{{ '%.2f'|format(expense.amount) }}" required>
                     </label>
                     <label>Description
-                      <input type="text" name="description" value="{{ expense.description }}" required>
+                      <input type="text" name="description" value="{{ expense.description }}" required data-edit-focus>
                     </label>
                     <label>Category
                       <input type="text" name="category" list="known-categories"
@@ -170,6 +267,7 @@
                   <a class="btn subtle" href="{{ url_for('expense_email', expense_id=expense.id) }}">Show email</a>
                 {% endif %}
                 <form method="post" action="{{ url_for('delete_expense', expense_id=expense.id) }}"
+                      data-confirm="Delete this expense?"
                       onsubmit="return confirm('Delete this expense?')">
                   <button class="btn danger" type="submit">Delete</button>
                 </form>
@@ -179,7 +277,15 @@
         </tbody>
       </table>
     {% else %}
-      <p class="empty">No expenses for this month yet.</p>
+      <div class="empty empty-state">
+        <h2>No expenses for this month yet</h2>
+        <p>{% if gmail_connected %}Fetch alerts from Gmail or add one by hand below.{% else %}Connect Gmail or add an expense by hand.{% endif %}</p>
+        {% if gmail_connected %}
+          <p><a class="btn primary" href="#fetch-expenses">Fetch expense alerts</a></p>
+        {% else %}
+          <p><a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a></p>
+        {% endif %}
+      </div>
     {% endif %}
   </section>
 
@@ -464,7 +570,9 @@
   {% if gmail_connected %}
   <section class="panel expense-fetch-panel">
     <h2>Fetch statements</h2>
-    <p class="sub">Pull credit-card statement PDFs from Gmail for the lookback window below.</p>
+    <p class="sub">Pull credit-card statement PDFs from Gmail for the lookback window below.
+      <span class="fetch-stamp">Statements last fetched {{ statements_fetched }} · Expenses last fetched {{ expenses_fetched }}</span>
+    </p>
     <form method="post" action="{{ url_for('run_ingest') }}" class="js-progress-form expense-fetch" data-job="fetch" data-title="Fetching statements">
       <label class="days-field">Look back
         <input type="number" name="months" value="1" min="1" max="24" inputmode="numeric" required aria-label="Number of months to look back">
@@ -476,7 +584,7 @@
   {% endif %}
 
   {% if not gmail_connected %}
-    <section class="panel setup">
+    <section class="panel setup empty-state">
       <h2>Connect Gmail to read statements</h2>
       {% if gmail_client_type %}
         <p class="sub">
@@ -504,13 +612,63 @@
     </section>
   {% endif %}
 
+  {% if due_urgency.overdue or due_urgency.due_3 or due_urgency.due_week %}
+  <section class="due-urgency" aria-label="Due urgency">
+    {% if due_urgency.overdue %}
+      <a class="urgency-chip overdue" href="#card-{{ due_urgency.overdue[0].card_id }}">
+        Overdue {{ due_urgency.overdue | length }}
+      </a>
+    {% endif %}
+    {% if due_urgency.due_3 %}
+      <a class="urgency-chip soon" href="#card-{{ due_urgency.due_3[0].card_id }}">
+        Due in 3 days {{ due_urgency.due_3 | length }}
+      </a>
+    {% endif %}
+    {% if due_urgency.due_week %}
+      <a class="urgency-chip week" href="#card-{{ due_urgency.due_week[0].card_id }}">
+        Due this week {{ due_urgency.due_week | length }}
+      </a>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section class="panel coverage-panel">
+    <details class="category-section">
+      <summary>
+        <h2>Coverage
+          <span class="count">{{ coverage.ok }} ok · {{ coverage.stale }} stale · {{ coverage.pending_unlock }} pending · {{ coverage.missing_txns }} missing txns</span>
+        </h2>
+      </summary>
+      <p class="sub">From statement audit and waiting attachments. Unlock forms stay in Attachments below.</p>
+      {% if coverage.cards %}
+        <ul class="coverage-list">
+          {% for row in coverage.cards %}
+            <li>
+              <a href="#card-{{ row.card_id }}">{{ row.label }} ••{{ row.last4 }}</a>
+              <span class="sub">
+                {% if row.statement_date %}{{ row.statement_date | dmy }}{% else %}No statement{% endif %}
+                {% if row.is_stale %}<span class="pill warn">stale</span>{% endif %}
+                {% if row.transactions_missing %}<span class="pill warn">Transactions not read</span>{% endif %}
+                {% if row.confidence is not none %}<span class="badge">{{ '%.0f'|format(row.confidence * 100) }}%</span>{% endif %}
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty">No cards to audit yet.</p>
+      {% endif %}
+    </details>
+  </section>
+
   <section class="panel expenses-month">
     <div class="month-nav">
       <a class="btn subtle" href="{{ url_for('index', tab='cards', month=expense_prev_month) }}">← Prev</a>
       <h2>{{ expense_month_label }}</h2>
       <a class="btn subtle" href="{{ url_for('index', tab='cards', month=expense_next_month) }}">Next →</a>
     </div>
-    <p class="sub">Billed statement totals for statements generated from the 10th of this month through the 9th of next month (not purchase calendar days).</p>
+    <p class="sub">Billed statement totals for statements generated from the 10th of this month through the 9th of next month (not purchase calendar days).
+      <span class="fetch-stamp">Statements last fetched {{ statements_fetched }} · Expenses last fetched {{ expenses_fetched }}</span>
+    </p>
   </section>
 
   <section class="summary">
@@ -523,7 +681,11 @@
       {% if card_category_totals %}
         <ul class="category-totals">
           {% for label, amount in card_category_totals %}
-            <li><span class="cat-label">{{ label }}</span> <span class="cat-amount">{{ amount | inr }}</span></li>
+            <li>
+              <span class="cat-dot {{ category_colors.get(label, 'cat-uncategorized') }}" aria-hidden="true"></span>
+              <span class="cat-label">{{ label }}</span>
+              <span class="cat-amount">{{ amount | inr }}</span>
+            </li>
           {% endfor %}
         </ul>
       {% endif %}
@@ -642,6 +804,28 @@
           {% if view.source %}<span class="badge">{{ view.source }}</span>{% endif %}
         </p>
 
+        {% if view.last_annual_fee %}
+          <p class="last-charge">
+            Last annual fee · {{ view.last_annual_fee.txn_date | dmy }} · {{ view.last_annual_fee.amount | inr }}
+          </p>
+          {% if view.last_charge and view.last_charge.id != view.last_annual_fee.id %}
+            <p class="last-charge quiet">
+              Also: {{ view.last_charge.label }} · {{ view.last_charge.txn_date | dmy }} · {{ view.last_charge.amount | inr }}
+            </p>
+          {% endif %}
+        {% elif view.last_charge %}
+          <p class="last-charge">
+            Last charge · {{ view.last_charge.label }} · {{ view.last_charge.txn_date | dmy }} · {{ view.last_charge.amount | inr }}
+          </p>
+        {% endif %}
+
+        {% if view.history | length > 1 and not view.is_latest and view.record %}
+          <p class="cycle-chip">
+            Viewing {{ view.record.statement_date | dmy or 'older cycle' }} ·
+            <a href="{{ url_for('index', tab='cards', month=expense_month_key) }}#card-{{ view.card.id }}">Back to latest</a>
+          </p>
+        {% endif %}
+
         {% if view.history | length > 1 %}
           <details class="months"{{ ' open' if not view.is_latest }}>
             <summary>
@@ -651,7 +835,7 @@
             <ul>
               {% for record in view.history %}
                 <li{{ ' class=chosen' | safe if record.id == view.record.id }}>
-                  <a href="{{ url_for('index', statement=record.id) }}#card-{{ view.card.id }}">
+                  <a href="{{ url_for('index', tab='cards', month=expense_month_key, statement=record.id) }}#card-{{ view.card.id }}">
                     {{ record.statement_date | dmy or 'no statement date' }}
                   </a>
                   <span class="figure">{{ record.total_due | inr }}</span>
@@ -661,28 +845,76 @@
             </ul>
             {% if not view.is_latest %}
               <p class="sub">
-                <a href="{{ url_for('index') }}#card-{{ view.card.id }}">Back to the latest statement</a>
+                <a href="{{ url_for('index', tab='cards', month=expense_month_key) }}#card-{{ view.card.id }}">Back to the latest statement</a>
               </p>
             {% endif %}
           </details>
         {% endif %}
 
         {% if view.transactions %}
-          <details class="txns">
+          <details class="txns"{% if txns_open or not view.is_latest %} open{% endif %}>
             <summary>
               <span class="show-closed">Show transactions</span>
               <span class="show-open">Hide transactions</span>
               <span class="count">{{ view.transactions | length }}</span>
             </summary>
+            {% if view.charges_this_cycle %}
+              <p class="charges-cycle">Charges this cycle: <strong>{{ view.charges_this_cycle | inr }}</strong></p>
+            {% endif %}
             {% if view.category_spend_totals %}
               <ul class="category-totals">
                 {% for label, amount in view.category_spend_totals %}
-                  <li><span class="cat-label">{{ label }}</span> <span class="cat-amount">{{ amount | inr }}</span></li>
+                  <li>
+                    <span class="cat-dot {{ category_colors.get(label, 'cat-uncategorized') }}" aria-hidden="true"></span>
+                    <span class="cat-label">{{ label }}</span>
+                    <span class="cat-amount">{{ amount | inr }}</span>
+                  </li>
                 {% endfor %}
               </ul>
             {% endif %}
+            {% if view.record %}
+              <p class="export-links">
+                <a class="btn subtle" href="{{ url_for('export_statement_txns_csv', statement_id=view.record.id, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export CSV</a>
+                <a class="btn subtle" href="{{ url_for('export_statement_txns_json', statement_id=view.record.id, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export JSON</a>
+              </p>
+              <form method="get" action="{{ url_for('index') }}" class="filter-row">
+                <input type="hidden" name="tab" value="cards">
+                <input type="hidden" name="month" value="{{ expense_month_key }}">
+                {% if not view.is_latest and view.record %}
+                  <input type="hidden" name="statement" value="{{ view.record.id }}">
+                {% endif %}
+                <div class="filter-fields">
+                  <label>Search
+                    <input type="search" name="q" value="{{ filter_q }}" placeholder="Description">
+                  </label>
+                  <label>Category
+                    <input type="text" name="category" list="known-categories" value="{{ filter_category }}">
+                  </label>
+                </div>
+                <div class="filter-toolbar">
+                  <span class="filter-actions">
+                    <button class="btn" type="submit">Filter</button>
+                    {% if filters %}
+                      {% if not view.is_latest %}
+                        <a class="btn subtle" href="{{ url_for('index', tab='cards', month=expense_month_key, statement=view.record.id) }}">Clear</a>
+                      {% else %}
+                        <a class="btn subtle" href="{{ url_for('index', tab='cards', month=expense_month_key) }}">Clear</a>
+                      {% endif %}
+                    {% endif %}
+                  </span>
+                </div>
+              </form>
+            {% endif %}
+            <div class="table-toolbar">
+              <label class="density-toggle">Density
+                <select data-density-select aria-label="Table density">
+                  <option value="comfortable">Comfortable</option>
+                  <option value="compact">Compact</option>
+                </select>
+              </label>
+            </div>
             <div class="scroll">
-              <table>
+              <table class="stackable-table" data-density-table>
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -693,29 +925,35 @@
                 </thead>
                 <tbody>
                   {% for txn in view.transactions %}
-                    <tr>
-                      <td>{{ txn.txn_date | dmy or '—' }}</td>
-                      <td>{{ txn.description }}</td>
-                      <td>
+                    <tr id="txn-{{ txn.id }}">
+                      <td data-label="Date">{{ txn.txn_date | dmy or '—' }}</td>
+                      <td data-label="Transaction">
+                        {{ txn.description }}
+                        {% if txn.charge_kind %}
+                          <span class="pill charge">{{ charge_label(txn.charge_kind) }}</span>
+                        {% endif %}
+                      </td>
+                      <td data-label="Category">
                         {% if txn.category %}
+                          <span class="cat-dot {{ category_colors.get(txn.category, 'cat-uncategorized') }}" aria-hidden="true"></span>
                           {{ txn.category }}
                           {% if txn.category_source == 'guess' %}<span class="badge">guess</span>{% endif %}
                         {% else %}—{% endif %}
-                        <details class="txn-edit">
+                        <details class="txn-edit" data-edit-panel>
                           <summary class="btn subtle">Edit</summary>
-                          <form method="post" action="{{ url_for('edit_transaction_category', txn_id=txn.id) }}" class="grid-form">
+                          <form method="post" action="{{ url_for('edit_transaction_category', txn_id=txn.id) }}" class="grid-form" data-edit-form>
                             {% if not view.is_latest and view.record %}
                               <input type="hidden" name="statement" value="{{ view.record.id }}">
                             {% endif %}
                             <label>Category
                               <input type="text" name="category" list="known-categories"
-                                     value="{{ txn.category or '' }}" placeholder="optional">
+                                     value="{{ txn.category or '' }}" placeholder="optional" data-edit-focus>
                             </label>
                             <button class="btn primary" type="submit">Save</button>
                           </form>
                         </details>
                       </td>
-                      <td class="num{{ ' credit' if txn.is_credit }}">{{ txn.signed_amount | inr }}</td>
+                      <td class="num{{ ' credit' if txn.is_credit }}" data-label="Amount">{{ txn.signed_amount | inr }}</td>
                     </tr>
                   {% endfor %}
                 </tbody>
@@ -788,67 +1026,69 @@
   </section>
 
   {% if unresolved %}
-    <section class="panel">
-      <h2>
-        Attachments that need you
-        {% if unresolved_total > unresolved | length %}
-          <span class="count">showing {{ unresolved | length }} of {{ unresolved_total }}</span>
+    <section class="panel attention-panel">
+      <details class="category-section" open>
+        <summary>
+          <h2>
+            Attachments that need you
+            <span class="count">{{ unresolved_total }}</span>
+          </h2>
+        </summary>
+        {% if gmail_connected %}
+          <form method="post" action="{{ url_for('reprocess_pending') }}" class="reopen js-progress-form" data-job="reprocess" data-title="Retrying waiting attachments">
+            <button class="btn" type="submit">Try these again</button>
+            <span class="sub">with the card details on file now</span>
+          </form>
         {% endif %}
-      </h2>
-      {% if gmail_connected %}
-        <form method="post" action="{{ url_for('reprocess_pending') }}" class="reopen js-progress-form" data-job="reprocess" data-title="Retrying waiting attachments">
-          <button class="btn" type="submit">Try these again</button>
-          <span class="sub">with the card details on file now</span>
-        </form>
-      {% endif %}
-      <ul class="issues">
-        {% for item in unresolved %}
-          <li>
-            <div class="issue-head">
-              <span class="badge {{ item.status }}">{{ item.status }}</span>
-              <span class="file">{{ item.filename }}</span>
-              {% if item.from_email %}<span class="from">{{ item.from_email }}</span>{% endif %}
-              {% if item.received %}<span class="when">{{ item.received }}</span>{% endif %}
-              <span class="detail">{{ item.detail }}</span>
-            </div>
+        <ul class="issues issues-scroll">
+          {% for item in unresolved %}
+            <li>
+              <div class="issue-head">
+                <span class="badge {{ item.status }}">{{ item.status }}</span>
+                <span class="file">{{ item.filename }}</span>
+                {% if item.from_email %}<span class="from">{{ item.from_email }}</span>{% endif %}
+                {% if item.received %}<span class="when">{{ item.received }}</span>{% endif %}
+                <span class="detail">{{ item.detail }}</span>
+              </div>
 
-            {% if item.sender or item.subject or item.received %}
-              <dl class="mail">
-                {% if item.sender %}<div><dt>From</dt><dd>{{ item.sender }}</dd></div>{% endif %}
-                {% if item.subject %}<div><dt>Subject</dt><dd>{{ item.subject }}</dd></div>{% endif %}
-                {% if item.received %}<div><dt>Received</dt><dd>{{ item.received }}</dd></div>{% endif %}
-              </dl>
-            {% endif %}
+              {% if item.sender or item.subject or item.received %}
+                <dl class="mail">
+                  {% if item.sender %}<div><dt>From</dt><dd>{{ item.sender }}</dd></div>{% endif %}
+                  {% if item.subject %}<div><dt>Subject</dt><dd>{{ item.subject }}</dd></div>{% endif %}
+                  {% if item.received %}<div><dt>Received</dt><dd>{{ item.received }}</dd></div>{% endif %}
+                </dl>
+              {% endif %}
 
-            {% if item.password_rule %}
-              <p class="quoted">The mail says: “{{ item.password_rule }}”</p>
-            {% endif %}
+              {% if item.password_rule %}
+                <p class="quoted">The mail says: “{{ item.password_rule }}”</p>
+              {% endif %}
 
-            {% if item.needs_card %}
-              {# The head detail already says no card is registered; only add the way out. #}
-              <p class="quoted">
-                Unlock it once below, or add the {{ item.issuer_name }} card with the cardholder
-                name and date of birth so future statements open on their own.
-              </p>
-            {% endif %}
+              {% if item.needs_card %}
+                {# The head detail already says no card is registered; only add the way out. #}
+                <p class="quoted">
+                  Unlock it once below, or add the {{ item.issuer_name }} card with the cardholder
+                  name and date of birth so future statements open on their own.
+                </p>
+              {% endif %}
 
-            {# Only a mail attachment can be retried; a local import is re-run with --password. #}
-            {% if item.can_retry %}
-              <form class="retry" method="post" action="{{ url_for('retry_locked') }}">
-                <input type="hidden" name="message_id" value="{{ item.message_id }}">
-                <input type="hidden" name="filename" value="{{ item.filename }}">
-                <input type="password" name="password" placeholder="PDF password" required>
-                <button class="btn" type="submit">Unlock</button>
-              </form>
-            {% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-      <p class="hint">
-        Locked statements are opened with the password rule stated in the covering mail. When that
-        rule is missing or unusual, type the password above and it is remembered for next month.
-        Anything still unreadable can be typed in with “Enter / correct”.
-      </p>
+              {# Only a mail attachment can be retried; a local import is re-run with --password. #}
+              {% if item.can_retry %}
+                <form class="retry" method="post" action="{{ url_for('retry_locked') }}">
+                  <input type="hidden" name="message_id" value="{{ item.message_id }}">
+                  <input type="hidden" name="filename" value="{{ item.filename }}">
+                  <input type="password" name="password" placeholder="PDF password" required>
+                  <button class="btn" type="submit">Unlock</button>
+                </form>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+        <p class="hint">
+          Locked statements are opened with the password rule stated in the covering mail. When that
+          rule is missing or unusual, type the password above and it is remembered for next month.
+          Anything still unreadable can be typed in with “Enter / correct”.
+        </p>
+      </details>
     </section>
   {% endif %}
 
@@ -919,6 +1159,7 @@
   </div>
 </dialog>
 
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 <script src="{{ url_for('static', filename='progress.js') }}"></script>
 </body>
 </html>

@@ -2,21 +2,28 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 import logging
 import re
 from datetime import date, datetime
+from urllib.parse import urlencode
 
 from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
 
 from .. import config, db, dues, expense_ingest, gmail, ingest, issuers
+from ..audit import audit_cards
 from ..categories import (
     CATEGORY_KEYWORDS,
+    UNCATEGORIZED,
     apply_category_rules,
     category_spend_totals,
     merchant_key,
     remember_merchant_category,
     remember_payee_alias,
 )
+from ..charges import charge_label
 from ..dues import format_inr
 from ..models import CATEGORY_USER, SOURCE_GMAIL, SOURCE_MANUAL, Card, Expense, StatementRecord
 
@@ -30,6 +37,23 @@ STATUS_LABELS = {
     dues.STATUS_SETTLED: "Settled",
     dues.STATUS_NO_DATA: "No data",
     dues.STATUS_UNKNOWN_DUE_DATE: "No due date",
+}
+
+# Stable muted dots for known categories (and Uncategorized).
+CATEGORY_COLORS = {
+    "Payment received": "cat-payment",
+    "Fees & interest": "cat-fees",
+    "EMI": "cat-emi",
+    "Cash & transfers": "cat-cash",
+    "Food & dining": "cat-food",
+    "Groceries": "cat-groceries",
+    "Travel": "cat-travel",
+    "Fuel": "cat-fuel",
+    "Bills & utilities": "cat-bills",
+    "Entertainment": "cat-entertainment",
+    "Health": "cat-health",
+    "Shopping": "cat-shopping",
+    UNCATEGORIZED: "cat-uncategorized",
 }
 
 
@@ -66,8 +90,6 @@ def _parse_amount(value: str | None) -> float | None:
         return None
 
 
-ATTENTION_SHOWN = 12
-
 # "HDFC Bank <estatement@hdfcbank.net>" → the address alone for the head line.
 _EMAIL_IN_BRACKETS = re.compile(r"<([^<>@\s]+@[^<>@\s]+)>")
 _BARE_EMAIL = re.compile(r"^[^<>@\s]+@[^<>@\s]+$")
@@ -86,11 +108,12 @@ def _email_address(sender: str | None) -> str | None:
     return value
 
 
-def _attention(conn, limit: int = ATTENTION_SHOWN) -> list[dict]:
+def _attention(conn, limit: int | None = None) -> list[dict]:
     """Attachments needing help, described well enough to act on.
 
     A statement from a card that was never registered cannot have its password
     worked out, so the mail it came in is the only thing left to go on.
+    Loads the full backlog; the UI scrolls within the panel.
     """
     registered = {card.issuer for card in db.list_cards(conn)}
     items: list[dict] = []
@@ -217,6 +240,192 @@ def _shift_month(month_start: date, delta: int) -> date:
     return date(year, month, 1)
 
 
+def _filter_args(args=None) -> dict:
+    """Active list filters from the query string (blank → omitted)."""
+    src = args if args is not None else request.args
+    out: dict = {}
+    q = (src.get("q") or "").strip()
+    if q:
+        out["q"] = q
+    category = (src.get("category") or "").strip()
+    if category:
+        out["category"] = category
+    min_amount = _parse_amount(src.get("min_amount"))
+    if min_amount is not None:
+        out["min_amount"] = min_amount
+    max_amount = _parse_amount(src.get("max_amount"))
+    if max_amount is not None:
+        out["max_amount"] = max_amount
+    if (src.get("charges") or "").strip().lower() in {"1", "true", "yes", "on"}:
+        out["charges_only"] = True
+    return out
+
+
+def _filter_query(**extra) -> str:
+    """Query string preserving month/tab/filters plus extras (e.g. highlight)."""
+    params: dict = {}
+    month = (request.args.get("month") or request.form.get("month") or "").strip()
+    if month:
+        params["month"] = month
+    tab = (request.args.get("tab") or request.form.get("tab") or "").strip()
+    if tab:
+        params["tab"] = tab
+    statement = request.args.get("statement") or request.form.get("statement")
+    if statement:
+        params["statement"] = statement
+    txns = (request.args.get("txns") or request.form.get("txns") or "").strip()
+    if txns:
+        params["txns"] = txns
+    for key, value in _filter_args().items():
+        if key == "charges_only":
+            params["charges"] = "1"
+        elif key in {"min_amount", "max_amount"}:
+            params[key] = f"{value:g}"
+        else:
+            params[key] = value
+    for key, value in extra.items():
+        if value is None or value == "":
+            continue
+        params[key] = value
+    return urlencode(params)
+
+
+def _coverage_summary(conn) -> dict:
+    """Portfolio strip + per-card rows from audit_cards + ingest backlog."""
+    findings = audit_cards(conn)
+    by_card: dict[int, list] = {}
+    pending_ingest = 0
+    for finding in findings:
+        if finding.kind == "pending_ingest":
+            pending_ingest = db.count_pending_ingest(conn)
+            continue
+        by_card.setdefault(finding.card_id, []).append(finding)
+
+    cards = []
+    ok = stale = missing_txns = 0
+    for view in dues.all_views(conn):
+        card_id = view.card.id or 0
+        card_findings = by_card.get(card_id, [])
+        has_missing = any(f.kind in {"transactions_missing", "parse_note"} for f in card_findings)
+        if view.is_stale:
+            stale += 1
+        if has_missing:
+            missing_txns += 1
+        if view.has_data and not view.is_stale and not has_missing:
+            ok += 1
+        cards.append(
+            {
+                "card_id": card_id,
+                "label": view.card.label,
+                "last4": view.card.last4,
+                "statement_date": view.statement_date,
+                "is_stale": view.is_stale,
+                "confidence": view.record.confidence if view.record else None,
+                "transactions_missing": view.transactions_missing
+                or any(f.kind == "parse_note" for f in card_findings),
+                "findings": card_findings,
+                "note": view.record.note if view.record else None,
+            }
+        )
+    return {
+        "cards": cards,
+        "ok": ok,
+        "stale": stale,
+        "pending_unlock": pending_ingest,
+        "missing_txns": missing_txns,
+        "findings": findings,
+    }
+
+
+def _due_urgency(book, *, today: date | None = None) -> dict:
+    """Counts for overdue / due in 3 days / due this week."""
+    today = today or date.today()
+    overdue = []
+    due_3 = []
+    due_week = []
+    for view in book.views:
+        if view.outstanding is not None and view.outstanding <= 0:
+            continue
+        if view.due_date is None:
+            continue
+        days = (view.due_date - today).days
+        entry = {"card_id": view.card.id, "label": view.card.label, "due_date": view.due_date}
+        if days < 0:
+            overdue.append(entry)
+        elif days <= 3:
+            due_3.append(entry)
+        if 0 <= days <= 7:
+            due_week.append(entry)
+    return {"overdue": overdue, "due_3": due_3, "due_week": due_week}
+
+
+def _format_fetch_stamp(value: str | None) -> str:
+    if not value:
+        return "Never"
+    try:
+        stamp = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return stamp.strftime("%d/%m/%Y %H:%M")
+
+
+def _expense_export_rows(expenses: list[Expense]) -> list[dict]:
+    rows = []
+    for expense in expenses:
+        rows.append(
+            {
+                "id": expense.id,
+                "spent_on": expense.spent_on.isoformat() if expense.spent_on else None,
+                "spent_on_dmy": format_dmy(expense.spent_on),
+                "amount": expense.amount,
+                "description": expense.description,
+                "category": expense.category,
+                "source": expense.source,
+                "note": expense.note,
+            }
+        )
+    return rows
+
+
+def _txn_export_rows(txns) -> list[dict]:
+    rows = []
+    for txn in txns:
+        rows.append(
+            {
+                "id": txn.id,
+                "txn_date": txn.txn_date.isoformat() if txn.txn_date else None,
+                "txn_date_dmy": format_dmy(txn.txn_date),
+                "description": txn.description,
+                "amount": txn.amount,
+                "kind": txn.kind,
+                "category": txn.category,
+                "charge_kind": txn.charge_kind,
+            }
+        )
+    return rows
+
+
+def _csv_response(filename: str, fieldnames: list[str], rows: list[dict]) -> Response:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return Response(
+        buf.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _json_response(filename: str, payload) -> Response:
+    return Response(
+        json.dumps(payload, indent=2, default=str),
+        mimetype="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 def create_app() -> Flask:
     app = Flask(__name__)
     # Signs flash messages and the OAuth state in a single-user local session.
@@ -284,10 +493,16 @@ def create_app() -> Flask:
         month_start = _parse_month(request.args.get("month"))
         month_end_exclusive = _month_window(month_start)[1]
         card_start, card_end = _card_billing_window(month_start)
-        expenses = db.list_expenses(conn, start=month_start, end=month_end_exclusive)
-        expense_total = db.expense_total(conn, start=month_start, end=month_end_exclusive)
-        card_month_txns = db.list_transactions_in_range(
-            conn, start=card_start, end=card_end
+        filters = _filter_args()
+        expenses = db.list_expenses(
+            conn, start=month_start, end=month_end_exclusive, **filters
+        )
+        # Totals ignore list filters so the month summary stays stable.
+        all_month_expenses = db.list_expenses(
+            conn, start=month_start, end=month_end_exclusive
+        )
+        expense_total = db.expense_total(
+            conn, start=month_start, end=month_end_exclusive
         )
         card_spend_total = db.card_spend_total(
             conn, start=card_start, end=card_end
@@ -295,6 +510,29 @@ def create_app() -> Flask:
         card_spend_by_card = db.card_spend_by_card(
             conn, start=card_start, end=card_end
         )
+        budgets = db.budget_status_for_month(
+            conn, start=month_start, end=month_end_exclusive
+        )
+
+        for view in book.views:
+            view.charges_cycle_total = view.charges_this_cycle
+
+        # Apply the same filters to each card's open statement table.
+        if filters:
+            for view in book.views:
+                if view.record and view.record.id:
+                    view.transactions = db.transactions_for_statement(
+                        conn, view.record.id, **filters
+                    )
+
+        highlight = (request.args.get("highlight") or "").strip()
+        txns_flag = (request.args.get("txns") or "").strip().lower()
+        # Global open: filters or ?txns=1. Older-cycle open is per-card in the template
+        # (not view.is_latest) so one statement select does not expand every card.
+        txns_open = bool(filters) or txns_flag in {"1", "true", "yes"}
+
+        # Attach last annual fee / last any charge for card tiles.
+        dues.attach_last_charges(conn, book.views)
 
         return render_template(
             "index.html",
@@ -311,7 +549,7 @@ def create_app() -> Flask:
             callback_uri=_callback_uri(),
             expenses=expenses,
             expense_total=expense_total,
-            expense_category_totals=category_spend_totals(expenses),
+            expense_category_totals=category_spend_totals(all_month_expenses),
             expense_month=month_start,
             expense_month_key=month_start.strftime("%Y-%m"),
             expense_month_label=month_start.strftime("%B %Y"),
@@ -320,12 +558,32 @@ def create_app() -> Flask:
             expense_months=db.expense_months(conn),
             card_spend_total=card_spend_total,
             card_spend_by_card=card_spend_by_card,
-            card_category_totals=category_spend_totals(card_month_txns),
+            card_category_totals=category_spend_totals(
+                db.list_transactions_in_range(conn, start=card_start, end=card_end)
+            ),
             category_phrases=db.list_category_phrases(conn),
             merchant_category_rows=db.list_merchant_categories(conn),
             payee_cues=db.list_payee_cues(conn),
             payee_aliases=db.list_payee_aliases(conn),
             known_categories=list(CATEGORY_KEYWORDS.keys()),
+            budgets=budgets,
+            filters=filters,
+            filter_q=filters.get("q", ""),
+            filter_category=filters.get("category", ""),
+            filter_min=filters.get("min_amount"),
+            filter_max=filters.get("max_amount"),
+            coverage=_coverage_summary(conn),
+            due_urgency=_due_urgency(book),
+            category_colors=CATEGORY_COLORS,
+            charge_label=charge_label,
+            highlight=highlight,
+            txns_open=txns_open,
+            statements_fetched=_format_fetch_stamp(
+                db.get_meta(conn, db.META_STATEMENTS_FETCHED)
+            ),
+            expenses_fetched=_format_fetch_stamp(
+                db.get_meta(conn, db.META_EXPENSES_FETCHED)
+            ),
         )
 
     @app.get("/auth/start")
@@ -500,6 +758,7 @@ def create_app() -> Flask:
             + ")"
         )
         flash(message, "success")
+        db.touch_meta_now(conn, db.META_STATEMENTS_FETCHED)
         return redirect(url_for("index"))
 
     @app.get("/ingest/stream")
@@ -555,6 +814,7 @@ def create_app() -> Flask:
                         done_total = len(summary.results)
                         done_parsed = summary.parsed
                         done_remaining = summary.remaining
+                        db.touch_meta_now(conn, db.META_STATEMENTS_FETCHED)
                     elif job == "reparse":
                         if not gmail.is_connected():
                             raise gmail.GmailNotConfigured(
@@ -596,6 +856,7 @@ def create_app() -> Flask:
                         done_total = len(summary.results)
                         done_parsed = summary.added
                         done_remaining = 0
+                        db.touch_meta_now(conn, db.META_EXPENSES_FETCHED)
                     else:
                         if not gmail.is_connected():
                             raise gmail.GmailNotConfigured(
@@ -961,7 +1222,14 @@ def create_app() -> Flask:
         if category:
             remember_merchant_category(conn, description, category)
         flash(f"Updated {format_inr(amount)} — {description}.", "success")
-        return redirect(url_for("index", tab="expenses", month=month_key))
+        return redirect(
+            url_for(
+                "index",
+                tab="expenses",
+                month=month_key,
+                highlight=f"expense-{expense_id}",
+            )
+        )
 
     @app.post("/transactions/<int:txn_id>/category")
     def edit_transaction_category(txn_id: int):
@@ -1037,6 +1305,196 @@ def create_app() -> Flask:
             body=body,
             back_url=back,
             today=date.today(),
+            gmail_connected=True,
+            can_teach=True,
+        )
+
+    @app.post("/expenses/<int:expense_id>/teach")
+    def teach_expense(expense_id: int):
+        """Save a payee cue/alias from the email view, or reparse this message."""
+        conn = db.connect()
+        db.init(conn)
+        expense = db.get_expense(conn, expense_id)
+        month_key = (
+            expense.spent_on.strftime("%Y-%m") if expense else date.today().strftime("%Y-%m")
+        )
+        back_email = url_for("expense_email", expense_id=expense_id)
+        back_list = url_for(
+            "index",
+            tab="expenses",
+            month=month_key,
+            highlight=f"expense-{expense_id}",
+        )
+        if expense is None:
+            flash("That expense is gone.", "error")
+            return redirect(url_for("index", tab="expenses", month=month_key))
+
+        action = (request.form.get("action") or "").strip().lower()
+        if action == "cue":
+            cue = (request.form.get("cue") or "").strip()
+            if db.upsert_payee_cue(conn, cue) is None:
+                flash("Enter a payee cue.", "error")
+            else:
+                flash(f"Payee cue “{cue}” saved.", "success")
+            return redirect(back_email)
+
+        if action == "alias":
+            raw = (request.form.get("raw") or expense.description or "").strip()
+            payee = (request.form.get("payee") or "").strip()
+            key = merchant_key(raw)
+            if not key or not payee:
+                flash("Enter a raw payee and a display name.", "error")
+                return redirect(back_email)
+            db.upsert_payee_alias(conn, key, payee)
+            flash(f"Payee “{key}” → {payee}.", "success")
+            return redirect(back_email)
+
+        if action == "reparse":
+            if expense.source != SOURCE_GMAIL or not expense.source_ref:
+                flash("This expense has no Gmail message to reparse.", "error")
+                return redirect(back_email)
+            if not gmail.is_connected():
+                flash("Connect Gmail to reparse this message.", "error")
+                return redirect(back_email)
+            try:
+                changed = expense_ingest.refresh_expense_from_gmail(
+                    conn, expense, interactive=False
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Teach reparse failed for expense %s", expense_id)
+                flash(f"Could not reparse that email: {exc}", "error")
+                return redirect(back_email)
+            if changed:
+                flash("Reparsed this message and updated the expense.", "success")
+            else:
+                flash("Reparsed this message; nothing changed.", "success")
+            return redirect(back_list)
+
+        flash("Unknown teach action.", "error")
+        return redirect(back_email)
+
+    @app.post("/category-budgets")
+    def upsert_budget():
+        conn = db.connect()
+        db.init(conn)
+        category = (request.form.get("category") or "").strip()
+        amount = _parse_amount(request.form.get("amount_limit"))
+        month_key = (request.form.get("month") or date.today().strftime("%Y-%m")).strip()
+        if not category or amount is None or amount <= 0:
+            flash("Enter a category and a positive monthly limit.", "error")
+            return redirect(url_for("index", tab="expenses", month=month_key))
+        db.upsert_category_budget(conn, category, amount)
+        flash(f"Budget for {category}: {format_inr(amount)} / month.", "success")
+        return redirect(
+            url_for("index", tab="expenses", month=month_key, highlight="budgets")
+        )
+
+    @app.post("/category-budgets/delete")
+    def delete_budget():
+        conn = db.connect()
+        db.init(conn)
+        category = (request.form.get("category") or "").strip()
+        month_key = (request.form.get("month") or date.today().strftime("%Y-%m")).strip()
+        if not category or not db.delete_category_budget(conn, category):
+            flash("That budget is gone.", "error")
+        else:
+            flash(f"Removed budget for {category}.", "success")
+        return redirect(url_for("index", tab="expenses", month=month_key))
+
+    @app.get("/export/expenses.csv")
+    def export_expenses_csv():
+        conn = db.connect()
+        db.init(conn)
+        month_start = _parse_month(request.args.get("month"))
+        start, end = _month_window(month_start)
+        expenses = db.list_expenses(conn, start=start, end=end, **_filter_args())
+        fieldnames = [
+            "id",
+            "spent_on",
+            "amount",
+            "description",
+            "category",
+            "source",
+            "note",
+        ]
+        csv_rows = [
+            {
+                "id": expense.id,
+                "spent_on": format_dmy(expense.spent_on),
+                "amount": expense.amount,
+                "description": expense.description,
+                "category": expense.category or "",
+                "source": expense.source,
+                "note": expense.note or "",
+            }
+            for expense in expenses
+        ]
+        return _csv_response(
+            f"expenses-{month_start.strftime('%Y-%m')}.csv", fieldnames, csv_rows
+        )
+
+    @app.get("/export/expenses.json")
+    def export_expenses_json():
+        conn = db.connect()
+        db.init(conn)
+        month_start = _parse_month(request.args.get("month"))
+        start, end = _month_window(month_start)
+        expenses = db.list_expenses(conn, start=start, end=end, **_filter_args())
+        payload = {
+            "month": month_start.strftime("%Y-%m"),
+            "expenses": _expense_export_rows(expenses),
+        }
+        return _json_response(
+            f"expenses-{month_start.strftime('%Y-%m')}.json", payload
+        )
+
+    @app.get("/export/statement/<int:statement_id>/transactions.csv")
+    def export_statement_txns_csv(statement_id: int):
+        conn = db.connect()
+        db.init(conn)
+        record = db.get_statement(conn, statement_id)
+        if record is None:
+            return Response("Statement not found", status=404)
+        txns = db.transactions_for_statement(conn, statement_id, **_filter_args())
+        fieldnames = [
+            "id",
+            "txn_date",
+            "description",
+            "amount",
+            "kind",
+            "category",
+            "charge_kind",
+        ]
+        csv_rows = [
+            {
+                "id": txn.id,
+                "txn_date": format_dmy(txn.txn_date),
+                "description": txn.description,
+                "amount": txn.amount,
+                "kind": txn.kind,
+                "category": txn.category or "",
+                "charge_kind": txn.charge_kind or "",
+            }
+            for txn in txns
+        ]
+        return _csv_response(
+            f"statement-{statement_id}-transactions.csv", fieldnames, csv_rows
+        )
+
+    @app.get("/export/statement/<int:statement_id>/transactions.json")
+    def export_statement_txns_json(statement_id: int):
+        conn = db.connect()
+        db.init(conn)
+        record = db.get_statement(conn, statement_id)
+        if record is None:
+            return Response("Statement not found", status=404)
+        txns = db.transactions_for_statement(conn, statement_id, **_filter_args())
+        payload = {
+            "statement_id": statement_id,
+            "transactions": _txn_export_rows(txns),
+        }
+        return _json_response(
+            f"statement-{statement_id}-transactions.json", payload
         )
 
     @app.post("/expenses/refresh")
@@ -1087,6 +1545,7 @@ def create_app() -> Flask:
             flash(f"Could not fetch expense alerts: {exc}", "error")
             return redirect(url_for("index", tab="expenses"))
 
+        db.touch_meta_now(conn, db.META_EXPENSES_FETCHED)
         flash(
             f"Added {summary.added} expense(s) from Gmail"
             + (f"; skipped {summary.skipped}." if summary.skipped else ".")

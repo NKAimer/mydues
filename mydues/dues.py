@@ -38,6 +38,9 @@ class DueView:
     history: list[StatementRecord] = field(default_factory=list)
     # Line items of the statement being shown, when they could be read.
     transactions: list[Transaction] = field(default_factory=list)
+    # Latest annual fee / any charge across all statements (card tile).
+    last_annual_fee: dict | None = None
+    last_charge: dict | None = None
 
     def __post_init__(self) -> None:
         if self.today is None:
@@ -51,6 +54,16 @@ class DueView:
     def transactions_total(self) -> float:
         """What the line items add up to, refunds and payments netted off."""
         return round(sum(txn.signed_amount for txn in self.transactions), 2)
+
+    @property
+    def charges_this_cycle(self) -> float:
+        """Debit total of line items flagged as fees / EMI / interest."""
+        total = 0.0
+        for txn in self.transactions:
+            if txn.is_credit or not txn.charge_kind:
+                continue
+            total += float(txn.amount)
+        return round(total, 2)
 
     @property
     def category_spend_totals(self) -> list[tuple[str, float]]:
@@ -309,6 +322,19 @@ def portfolio(
     selected: dict[int, int] | None = None,
 ) -> Portfolio:
     return Portfolio(views=all_views(conn, today=today, selected=selected))
+
+
+def attach_last_charges(conn: sqlite3.Connection, views: list[DueView]) -> None:
+    """Attach latest annual-fee / any-charge rows onto each DueView (mutates in place)."""
+    by_card = db.latest_charges_by_card(conn)
+    for view in views:
+        payload = by_card.get(view.card.id)
+        if not payload:
+            view.last_annual_fee = None
+            view.last_charge = None
+            continue
+        view.last_annual_fee = payload.get("annual")
+        view.last_charge = payload.get("any")
 
 
 def format_inr(amount: float | None) -> str:

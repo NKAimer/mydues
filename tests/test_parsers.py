@@ -109,6 +109,19 @@ def test_hdfc_swiggy_reads_fused_minimum_due_due_date_row():
     assert result.due_date == date(2026, 8, 9)
 
 
+def test_hdfc_tata_neu_tc_phone_is_not_total_due():
+    """HDFC ERGO Toll Free +800 08250825 must not overwrite TOTAL AMOUNT DUE."""
+    result = parse(fixtures.HDFC_TATA_NEU_TC_PHONE, issuer_hint="hdfc")
+
+    assert result is not None
+    assert result.last4 == "2750"
+    assert result.total_due == pytest.approx(172729.0)
+    assert result.total_due != pytest.approx(8250825.0)
+    assert result.min_due == pytest.approx(8640.0)
+    assert result.min_due != pytest.approx(800.0)
+    assert result.due_date == date(2026, 5, 21)
+
+
 def test_yesbank_reads_amounts_from_the_line_below_labels():
     """Points Earned : 0 and Available Cash Limit Cr must not become dues."""
     result = parse(fixtures.YESBANK_KLICK, issuer_hint="yesbank")

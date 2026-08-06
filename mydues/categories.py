@@ -27,15 +27,31 @@ CATEGORY_KEYWORDS: dict[str, tuple[str, ...]] = {
         "interest",
         "finance charge",
         "late payment",
+        "late fee",
+        "overdue charge",
         "annual fee",
         "joining fee",
         "membership fee",
         "surcharge",
         "markup",
         "penalty",
+        "gst on fee",
         "gst",
         "igst",
         "cgst",
+        "service fee",
+        "processing fee",
+        "convenience fee",
+    ),
+    "EMI": (
+        "easy emi",
+        "loan installment",
+        "loan instalment",
+        "emi installment",
+        "emi instalment",
+        " emi ",
+        "installment",
+        "instalment",
     ),
     "Cash & transfers": (
         "atm",
@@ -397,13 +413,17 @@ def resolve_category(
     note: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> tuple[str | None, str | None]:
-    """Pick a category: issuer print → merchant memory → phrase rules.
+    """Pick a category: issuer print → merchant memory → phrase rules / charge.
 
     With a connection, phrase rules come from ``category_phrases`` (seeded from
     builtins on init). Without one, ``categorise`` uses the built-in map.
 
     Returns `(category, source)` where source is statement / memory / guess.
+    Charge kinds map to Fees & interest / EMI on the guess path only when no
+    stronger match already won.
     """
+    from .charges import category_for_charge, detect_charge_kind
+
     if printed and _LETTERS.search(printed):
         return printed.strip(), CATEGORY_STATEMENT
 
@@ -427,7 +447,13 @@ def resolve_category(
     if note and note.strip() and note.strip().lower() != blob.strip().lower():
         blob = f"{blob} {note}".strip()
     guess = categorise(blob, phrases=phrases)
-    return (guess, CATEGORY_GUESS) if guess else (None, None)
+    if guess:
+        return guess, CATEGORY_GUESS
+
+    charge_cat = category_for_charge(detect_charge_kind(description, note=note))
+    if charge_cat:
+        return charge_cat, CATEGORY_GUESS
+    return (None, None)
 
 
 def _may_reapply(old_source: str | None, new_source: str | None) -> bool:
@@ -448,9 +474,12 @@ def apply_category_rules(conn: sqlite3.Connection) -> dict[str, int]:
     """Re-resolve blank/auto categories on expenses and statement transactions.
 
     Skips manual ``user`` edits. Issuer-printed ``statement`` rows are only
-    updated when a learned merchant matches. Does not teach merchant memory.
+    updated when a learned merchant matches. Refreshes null charge_kind on
+    statement transactions only. Does not teach merchant memory.
     Returns counts of rows whose category or source changed.
     """
+    from .charges import detect_charge_kind
+
     expenses_updated = 0
     for row in conn.execute(
         "SELECT id, description, note, category, category_source FROM expenses"
@@ -460,28 +489,39 @@ def apply_category_rules(conn: sqlite3.Connection) -> dict[str, int]:
         )
         if not _may_reapply(row["category_source"], source):
             continue
-        if category == row["category"] and source == row["category_source"]:
-            continue
-        conn.execute(
-            "UPDATE expenses SET category = ?, category_source = ? WHERE id = ?",
-            (category, source, row["id"]),
-        )
-        expenses_updated += 1
+        if category != row["category"] or source != row["category_source"]:
+            conn.execute(
+                "UPDATE expenses SET category = ?, category_source = ?, charge_kind = NULL "
+                "WHERE id = ?",
+                (category, source, row["id"]),
+            )
+            expenses_updated += 1
 
     transactions_updated = 0
     for row in conn.execute(
-        "SELECT id, description, category, category_source FROM transactions"
+        "SELECT id, description, category, category_source, charge_kind FROM transactions"
     ).fetchall():
         category, source = resolve_category(row["description"], conn=conn)
-        if not _may_reapply(row["category_source"], source):
+        kind = row["charge_kind"] or detect_charge_kind(row["description"] or "")
+        cat_change = False
+        if _may_reapply(row["category_source"], source):
+            if category != row["category"] or source != row["category_source"]:
+                cat_change = True
+        kind_change = kind != row["charge_kind"]
+        if not cat_change and not kind_change:
             continue
-        if category == row["category"] and source == row["category_source"]:
-            continue
-        conn.execute(
-            "UPDATE transactions SET category = ?, category_source = ? WHERE id = ?",
-            (category, source, row["id"]),
-        )
-        transactions_updated += 1
+        if cat_change:
+            conn.execute(
+                "UPDATE transactions SET category = ?, category_source = ?, charge_kind = ? "
+                "WHERE id = ?",
+                (category, source, kind, row["id"]),
+            )
+            transactions_updated += 1
+        elif kind_change:
+            conn.execute(
+                "UPDATE transactions SET charge_kind = ? WHERE id = ?",
+                (kind, row["id"]),
+            )
 
     conn.commit()
     return {

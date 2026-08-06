@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Iterable
 
 from . import config
+from .charges import detect_charge_kind
 from .models import CATEGORY_USER, Card, Expense, StatementRecord, Transaction
 
 SCHEMA = """
@@ -128,6 +129,17 @@ CREATE TABLE IF NOT EXISTS payee_aliases (
     payee TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS category_budgets (
+    category TEXT PRIMARY KEY COLLATE NOCASE,
+    amount_limit REAL NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS app_meta (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 # Columns added after the first release. SQLite cannot express these with
@@ -142,8 +154,15 @@ ADDED_COLUMNS = {
     },
     "expenses": {
         "category_source": "TEXT",
+        "charge_kind": "TEXT",
+    },
+    "transactions": {
+        "charge_kind": "TEXT",
     },
 }
+
+META_STATEMENTS_FETCHED = "statements_last_fetched"
+META_EXPENSES_FETCHED = "expenses_last_fetched"
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
@@ -167,6 +186,7 @@ def init(conn: sqlite3.Connection) -> None:
             if column not in present:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
     conn.commit()
+    _backfill_charge_kinds(conn)
     # Parser once mistook an HDFC alternate account number for last4 0722 / 2476.
     retarget_card_last4(conn, issuer="hdfc", from_last4="0722", to_last4="2750")
     retarget_card_last4(conn, issuer="hdfc", from_last4="2476", to_last4="6527")
@@ -209,6 +229,44 @@ def init(conn: sqlite3.Connection) -> None:
     seed_payee_cues_from_builtins(conn)
     merge_categories_seed(conn)
     conn.commit()
+
+
+def _backfill_charge_kinds(conn: sqlite3.Connection) -> None:
+    """One-shot: classify null charge_kind on statement transactions only."""
+    for row in conn.execute(
+        "SELECT id, description FROM transactions WHERE charge_kind IS NULL"
+    ).fetchall():
+        kind = detect_charge_kind(row["description"] or "")
+        if kind:
+            conn.execute(
+                "UPDATE transactions SET charge_kind = ? WHERE id = ?",
+                (kind, row["id"]),
+            )
+    # Clear any legacy expense flags — charges are statement-display only.
+    conn.execute("UPDATE expenses SET charge_kind = NULL WHERE charge_kind IS NOT NULL")
+    conn.commit()
+
+
+def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
+    row = conn.execute("SELECT value FROM app_meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        """
+        INSERT INTO app_meta (key, value) VALUES (?, ?)
+        ON CONFLICT (key) DO UPDATE SET value = excluded.value
+        """,
+        (key, value),
+    )
+    conn.commit()
+
+
+def touch_meta_now(conn: sqlite3.Connection, key: str) -> str:
+    stamp = datetime.now().isoformat(timespec="seconds")
+    set_meta(conn, key, stamp)
+    return stamp
 
 
 def seed_category_phrases_from_builtins(conn: sqlite3.Connection) -> int:
@@ -708,11 +766,12 @@ def save_transactions(
     now = datetime.now().isoformat(timespec="seconds")
     saved = 0
     for txn in rows:
+        charge_kind = txn.charge_kind or detect_charge_kind(txn.description)
         cursor = conn.execute(
             """
             INSERT INTO transactions (card_id, statement_id, txn_date, description, amount,
-                                      kind, category, category_source, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      kind, category, category_source, charge_kind, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT DO NOTHING
             """,
             (
@@ -724,6 +783,7 @@ def save_transactions(
                 txn.kind,
                 txn.category,
                 txn.category_source,
+                charge_kind,
                 now,
             ),
         )
@@ -732,25 +792,53 @@ def save_transactions(
     return saved
 
 
-def transactions_for_statement(conn: sqlite3.Connection, statement_id: int) -> list[Transaction]:
+def _transaction_from_row(row: sqlite3.Row) -> Transaction:
+    keys = row.keys()
+    return Transaction(
+        id=row["id"],
+        txn_date=_as_date(row["txn_date"]),
+        description=row["description"],
+        amount=float(row["amount"]),
+        kind=row["kind"],
+        category=row["category"],
+        category_source=row["category_source"],
+        charge_kind=row["charge_kind"] if "charge_kind" in keys else None,
+    )
+
+
+def transactions_for_statement(
+    conn: sqlite3.Connection,
+    statement_id: int,
+    *,
+    q: str | None = None,
+    category: str | None = None,
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    charges_only: bool = False,
+) -> list[Transaction]:
     """Line items in the order they were billed, undated ones last."""
+    clauses = ["statement_id = ?"]
+    params: list = [statement_id]
+    _append_ledger_filters(
+        clauses,
+        params,
+        q=q,
+        category=category,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        charges_only=charges_only,
+        description_col="description",
+        note_col=None,
+        amount_col="amount",
+        category_col="category",
+        charge_col="charge_kind",
+    )
     rows = conn.execute(
-        "SELECT * FROM transactions WHERE statement_id = ? "
+        f"SELECT * FROM transactions WHERE {' AND '.join(clauses)} "
         "ORDER BY txn_date IS NULL, txn_date, id",
-        (statement_id,),
+        params,
     ).fetchall()
-    return [
-        Transaction(
-            id=row["id"],
-            txn_date=_as_date(row["txn_date"]),
-            description=row["description"],
-            amount=row["amount"],
-            kind=row["kind"],
-            category=row["category"],
-            category_source=row["category_source"],
-        )
-        for row in rows
-    ]
+    return [_transaction_from_row(row) for row in rows]
 
 
 def update_transaction_category(
@@ -771,18 +859,10 @@ def update_transaction_category(
         (category, source, txn_id),
     )
     conn.commit()
-    return (
-        Transaction(
-            id=row["id"],
-            txn_date=_as_date(row["txn_date"]),
-            description=row["description"],
-            amount=row["amount"],
-            kind=row["kind"],
-            category=category,
-            category_source=source,
-        ),
-        int(row["card_id"]),
-    )
+    txn = _transaction_from_row(row)
+    txn.category = category
+    txn.category_source = source
+    return (txn, int(row["card_id"]))
 
 
 def add_payment(
@@ -796,7 +876,47 @@ def add_payment(
     return int(cursor.lastrowid or 0)
 
 
+def _append_ledger_filters(
+    clauses: list[str],
+    params: list,
+    *,
+    q: str | None,
+    category: str | None,
+    min_amount: float | None,
+    max_amount: float | None,
+    charges_only: bool,
+    description_col: str,
+    note_col: str | None,
+    amount_col: str,
+    category_col: str,
+    charge_col: str,
+) -> None:
+    """Shared WHERE fragments for expense / transaction list + export."""
+    needle = (q or "").strip()
+    if needle:
+        like = f"%{needle}%"
+        if note_col:
+            clauses.append(f"({description_col} LIKE ? OR IFNULL({note_col}, '') LIKE ?)")
+            params.extend([like, like])
+        else:
+            clauses.append(f"{description_col} LIKE ?")
+            params.append(like)
+    cat = (category or "").strip()
+    if cat:
+        clauses.append(f"{category_col} = ? COLLATE NOCASE")
+        params.append(cat)
+    if min_amount is not None:
+        clauses.append(f"{amount_col} >= ?")
+        params.append(min_amount)
+    if max_amount is not None:
+        clauses.append(f"{amount_col} <= ?")
+        params.append(max_amount)
+    if charges_only:
+        clauses.append(f"{charge_col} IS NOT NULL AND TRIM({charge_col}) != ''")
+
+
 def _expense_from_row(row: sqlite3.Row) -> Expense:
+    keys = row.keys()
     return Expense(
         id=row["id"],
         spent_on=_as_date(row["spent_on"]) or date.today(),
@@ -804,6 +924,7 @@ def _expense_from_row(row: sqlite3.Row) -> Expense:
         description=row["description"],
         category=row["category"],
         category_source=row["category_source"],
+        charge_kind=row["charge_kind"] if "charge_kind" in keys else None,
         source=row["source"],
         source_ref=row["source_ref"],
         note=row["note"],
@@ -813,13 +934,14 @@ def _expense_from_row(row: sqlite3.Row) -> Expense:
 
 def add_expense(conn: sqlite3.Connection, expense: Expense) -> int | None:
     """Insert an expense. Returns id, or None when a keyed duplicate already exists."""
+    # charge_kind is for statement line items only; expenses stay unflagged.
     try:
         cursor = conn.execute(
             """
             INSERT INTO expenses (
                 spent_on, amount, description, category, category_source,
-                source, source_ref, note, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                charge_kind, source, source_ref, note, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _iso(expense.spent_on),
@@ -827,6 +949,7 @@ def add_expense(conn: sqlite3.Connection, expense: Expense) -> int | None:
                 expense.description.strip(),
                 expense.category,
                 expense.category_source,
+                None,
                 expense.source,
                 expense.source_ref,
                 expense.note,
@@ -840,16 +963,40 @@ def add_expense(conn: sqlite3.Connection, expense: Expense) -> int | None:
 
 
 def list_expenses(
-    conn: sqlite3.Connection, *, start: date, end: date
+    conn: sqlite3.Connection,
+    *,
+    start: date,
+    end: date,
+    q: str | None = None,
+    category: str | None = None,
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    charges_only: bool = False,
 ) -> list[Expense]:
     """Expenses with spent_on in [start, end)."""
+    clauses = ["spent_on >= ?", "spent_on < ?"]
+    params: list = [_iso(start), _iso(end)]
+    _append_ledger_filters(
+        clauses,
+        params,
+        q=q,
+        category=category,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        charges_only=charges_only,
+        description_col="description",
+        note_col="note",
+        amount_col="amount",
+        category_col="category",
+        charge_col="charge_kind",
+    )
     rows = conn.execute(
-        """
+        f"""
         SELECT * FROM expenses
-        WHERE spent_on >= ? AND spent_on < ?
+        WHERE {' AND '.join(clauses)}
         ORDER BY spent_on DESC, id DESC
         """,
-        (_iso(start), _iso(end)),
+        params,
     ).fetchall()
     return [_expense_from_row(row) for row in rows]
 
@@ -869,13 +1016,17 @@ def update_expense(
     category: str | None,
     category_source: str | None = None,
     note: str | None = None,
+    charge_kind: str | None | object = ...,
 ) -> bool:
-    """Update editable fields; leaves source / source_ref alone. True if a row changed."""
+    """Update editable fields; leaves source / source_ref alone. True if a row changed.
+
+    ``charge_kind`` is ignored for expenses (statement transactions only).
+    """
     cursor = conn.execute(
         """
         UPDATE expenses
         SET spent_on = ?, amount = ?, description = ?, category = ?,
-            category_source = ?, note = ?
+            category_source = ?, note = ?, charge_kind = NULL
         WHERE id = ?
         """,
         (
@@ -910,31 +1061,219 @@ def expense_total(conn: sqlite3.Connection, *, start: date, end: date) -> float:
 
 
 def list_transactions_in_range(
-    conn: sqlite3.Connection, *, start: date, end: date
+    conn: sqlite3.Connection,
+    *,
+    start: date,
+    end: date,
+    q: str | None = None,
+    category: str | None = None,
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    charges_only: bool = False,
 ) -> list[Transaction]:
     """Line items on statements whose statement_date falls in [start, end)."""
+    clauses = [
+        "s.statement_date IS NOT NULL",
+        "s.statement_date >= ?",
+        "s.statement_date < ?",
+    ]
+    params: list = [_iso(start), _iso(end)]
+    _append_ledger_filters(
+        clauses,
+        params,
+        q=q,
+        category=category,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        charges_only=charges_only,
+        description_col="t.description",
+        note_col=None,
+        amount_col="t.amount",
+        category_col="t.category",
+        charge_col="t.charge_kind",
+    )
     rows = conn.execute(
-        """
+        f"""
         SELECT t.* FROM transactions t
         JOIN statements s ON s.id = t.statement_id
-        WHERE s.statement_date IS NOT NULL
-          AND s.statement_date >= ? AND s.statement_date < ?
+        WHERE {' AND '.join(clauses)}
         ORDER BY t.txn_date IS NULL, t.txn_date, t.id
         """,
-        (_iso(start), _iso(end)),
+        params,
     ).fetchall()
-    return [
-        Transaction(
-            id=row["id"],
-            txn_date=_as_date(row["txn_date"]),
-            description=row["description"],
-            amount=float(row["amount"]),
-            kind=row["kind"],
-            category=row["category"],
-            category_source=row["category_source"],
-        )
-        for row in rows
+    return [_transaction_from_row(row) for row in rows]
+
+
+def charges_total_for_statement(conn: sqlite3.Connection, statement_id: int) -> float:
+    """Sum of debit amounts flagged with a charge_kind on one statement."""
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(amount), 0) AS total FROM transactions
+        WHERE statement_id = ?
+          AND kind = 'debit'
+          AND charge_kind IS NOT NULL
+          AND TRIM(charge_kind) != ''
+        """,
+        (statement_id,),
+    ).fetchone()
+    return float(row["total"])
+
+
+def latest_charge_for_card(
+    conn: sqlite3.Connection,
+    card_id: int,
+    *,
+    kinds: tuple[str, ...] | None = None,
+) -> dict | None:
+    """Newest debit charge on a card, optionally limited to charge_kind values."""
+    clauses = [
+        "card_id = ?",
+        "kind = 'debit'",
+        "charge_kind IS NOT NULL",
+        "TRIM(charge_kind) != ''",
     ]
+    params: list = [card_id]
+    if kinds:
+        placeholders = ", ".join("?" for _ in kinds)
+        clauses.append(f"charge_kind IN ({placeholders})")
+        params.extend(kinds)
+    row = conn.execute(
+        f"""
+        SELECT id, description, amount, txn_date, charge_kind, statement_id, card_id
+        FROM transactions
+        WHERE {' AND '.join(clauses)}
+        ORDER BY txn_date IS NULL, txn_date DESC, id DESC
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    return _charge_dict_from_row(row)
+
+
+def _charge_dict_from_row(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    from .charges import charge_label
+
+    kind = row["charge_kind"]
+    return {
+        "id": row["id"],
+        "description": row["description"],
+        "amount": float(row["amount"]),
+        "txn_date": _as_date(row["txn_date"]) if row["txn_date"] else None,
+        "kind": kind,
+        "label": charge_label(kind) or kind,
+        "statement_id": row["statement_id"],
+    }
+
+
+def latest_charges_by_card(conn: sqlite3.Connection) -> dict[int, dict]:
+    """Per card: ``annual`` and ``any`` latest charge dicts (may be the same row)."""
+    from .charges import CHARGE_ANNUAL_FEE
+
+    def _latest_map(*, kinds: tuple[str, ...] | None = None) -> dict[int, dict]:
+        clauses = [
+            "kind = 'debit'",
+            "charge_kind IS NOT NULL",
+            "TRIM(charge_kind) != ''",
+        ]
+        params: list = []
+        if kinds:
+            placeholders = ", ".join("?" for _ in kinds)
+            clauses.append(f"charge_kind IN ({placeholders})")
+            params.extend(kinds)
+        rows = conn.execute(
+            f"""
+            SELECT id, card_id, description, amount, txn_date, charge_kind, statement_id
+            FROM (
+              SELECT id, card_id, description, amount, txn_date, charge_kind, statement_id,
+                     ROW_NUMBER() OVER (
+                       PARTITION BY card_id
+                       ORDER BY txn_date IS NULL, txn_date DESC, id DESC
+                     ) AS rn
+              FROM transactions
+              WHERE {' AND '.join(clauses)}
+            )
+            WHERE rn = 1
+            """,
+            params,
+        ).fetchall()
+        return {int(row["card_id"]): _charge_dict_from_row(row) for row in rows}
+
+    any_by_card = _latest_map()
+    annual_by_card = _latest_map(kinds=(CHARGE_ANNUAL_FEE,))
+    out: dict[int, dict] = {}
+    for card_id in set(any_by_card) | set(annual_by_card):
+        out[card_id] = {
+            "annual": annual_by_card.get(card_id),
+            "any": any_by_card.get(card_id),
+        }
+    return out
+
+
+def list_category_budgets(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT category, amount_limit, updated_at FROM category_budgets "
+        "ORDER BY category COLLATE NOCASE"
+    ).fetchall()
+
+
+def upsert_category_budget(
+    conn: sqlite3.Connection, category: str, amount_limit: float
+) -> bool:
+    """Insert or update a monthly category limit. False if invalid."""
+    category = (category or "").strip()
+    if not category or amount_limit is None or amount_limit <= 0:
+        return False
+    conn.execute(
+        """
+        INSERT INTO category_budgets (category, amount_limit, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT (category) DO UPDATE SET
+            amount_limit = excluded.amount_limit,
+            updated_at = excluded.updated_at
+        """,
+        (category, float(amount_limit), datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    return True
+
+
+def delete_category_budget(conn: sqlite3.Connection, category: str) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM category_budgets WHERE category = ? COLLATE NOCASE",
+        ((category or "").strip(),),
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def budget_status_for_month(
+    conn: sqlite3.Connection, *, start: date, end: date
+) -> list[dict]:
+    """Budgets joined with spend for [start, end). Includes zero-spend budget rows."""
+    from .categories import category_spend_totals
+
+    expenses = list_expenses(conn, start=start, end=end)
+    spent_map = dict(category_spend_totals(expenses))
+    rows: list[dict] = []
+    for budget in list_category_budgets(conn):
+        label = budget["category"]
+        limit = float(budget["amount_limit"])
+        spent = float(spent_map.get(label, 0.0))
+        remaining = round(limit - spent, 2)
+        rows.append(
+            {
+                "category": label,
+                "amount_limit": limit,
+                "spent": round(spent, 2),
+                "remaining": remaining,
+                "over": spent > limit,
+                "pct": min(100.0, round(100.0 * spent / limit, 1)) if limit else 0.0,
+            }
+        )
+    rows.sort(key=lambda r: (-r["spent"], r["category"].lower()))
+    return rows
 
 
 def card_spend_total(conn: sqlite3.Connection, *, start: date, end: date) -> float:

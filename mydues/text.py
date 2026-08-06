@@ -81,10 +81,18 @@ def _is_reference_id(match: re.Match[str], raw: str) -> bool:
     return bool(re.search(r"(?i)(?:STMT|Statement)\s*No\.?", prefix))
 
 
+def _is_phone_or_padded_id(match: re.Match[str]) -> bool:
+    """True for dial strings like 08250825 (HDFC ERGO Toll Free), not rupees."""
+    num = match.group("num") or ""
+    if "," in num or "." in num or len(num) <= 1:
+        return False
+    return num.startswith("0") and not num.startswith("0.")
+
+
 def parse_amount(raw: str) -> float | None:
     """Return a signed amount. A Cr suffix means the issuer owes you."""
     for match in AMOUNT_RE.finditer(raw or ""):
-        if _is_reference_id(match, raw or ""):
+        if _is_reference_id(match, raw or "") or _is_phone_or_padded_id(match):
             continue
         try:
             value = float(match.group("num").replace(",", ""))
@@ -101,7 +109,7 @@ def parse_amounts(raw: str) -> list[float]:
     """Every plausible money amount in `raw`, skipping statement/reference ids."""
     found: list[float] = []
     for match in AMOUNT_RE.finditer(raw or ""):
-        if _is_reference_id(match, raw or ""):
+        if _is_reference_id(match, raw or "") or _is_phone_or_padded_id(match):
             continue
         try:
             value = float(match.group("num").replace(",", ""))
