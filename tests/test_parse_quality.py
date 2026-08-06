@@ -153,3 +153,71 @@ def test_audit_reports_missing_transactions(conn):
     findings = audit.audit_cards(conn)
     kinds = {f.kind for f in findings if f.card_id == card.id}
     assert "transactions_missing" in kinds
+
+
+def test_absurd_total_reason_phone_like():
+    bad = ParsedStatement(total_due=8250825.0, last4="2750", issuer="hdfc")
+    reason = parse_quality.absurd_total_reason(bad)
+    assert reason is not None
+    assert "phone" in reason.lower()
+
+
+def test_absurd_total_reason_allows_normal_large_bill():
+    ok = ParsedStatement(total_due=172729.0, last4="2750", issuer="hdfc")
+    assert parse_quality.absurd_total_reason(ok, recent_totals=[4059.0, 4373.0]) is None
+
+
+def test_absurd_total_reason_flags_million_jump():
+    # Paise so it is not classified as a bare phone-like integer.
+    bad = ParsedStatement(total_due=2_500_000.50, last4="2750", issuer="hdfc")
+    reason = parse_quality.absurd_total_reason(bad, recent_totals=[5000.0, 6000.0])
+    assert reason is not None
+    assert "jumped" in reason
+
+
+def test_store_refuses_phone_like_total(conn):
+    card = Card(issuer="hdfc", label="HDFC", last4="2750")
+    card.id = db.add_card(conn, card)
+    db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=card.id,
+            total_due=5000.0,
+            min_due=250.0,
+            due_date=date(2026, 4, 21),
+            statement_date=date(2026, 4, 1),
+            source=SOURCE_STATEMENT,
+            source_ref="prior",
+            as_of=datetime(2026, 4, 2),
+        ),
+    )
+    db.save_statement(
+        conn,
+        StatementRecord(
+            card_id=card.id,
+            total_due=6000.0,
+            min_due=300.0,
+            due_date=date(2026, 5, 21),
+            statement_date=date(2026, 5, 1),
+            source=SOURCE_STATEMENT,
+            source_ref="prior2",
+            as_of=datetime(2026, 5, 2),
+        ),
+    )
+    before = len(db.statements_for_card(conn, card.id))
+    status, detail, card_id = ingest.store(
+        conn,
+        ParsedStatement(
+            total_due=8250825.0,
+            min_due=800.0,
+            due_date=date(2026, 6, 21),
+            statement_date=date(2026, 6, 1),
+            last4="2750",
+            issuer="hdfc",
+        ),
+        source_ref="phone-bad",
+    )
+    assert status == ingest.STATUS_ERROR
+    assert "phone" in detail.lower() or "refused" in detail.lower()
+    assert card_id == card.id
+    assert len(db.statements_for_card(conn, card.id)) == before

@@ -241,6 +241,24 @@ l If the minimum amount due or part amount less than the total amount due is pai
 Insurance provider: HDFC ERGO. Toll Free: +800 08250825/01204507250 (Chargeable)
 """
 
+# Same layout with the dial string missing its leading zero — still not a bill.
+HDFC_TATA_NEU_TC_PHONE_NO_LEADING_ZERO = """
+Tata Neu Infinity HDFC Bank Credit Card Statement
+Credit Card No. 652926XXXXXX2750
+Statement Date 01 May, 2026
+PREVIOUS STATEMENT DUES FINANCE CHARGES TOTAL AMOUNT DUE
+RECEIVED (Current Billing Cycle)
+_ C1,72,729.00
+TOTAL CREDIT LIMIT
+(Including Cash) AVAILABLE CREDIT LIMIT AVAILABLE CASH LIMIT MINIMUM DUE DUE DATE
+C8,640.00 21 May, 2026
+C3,98,000 C2,25,271 C1,59,200
+Past Dues OVER LIMIT 3 MONTHS + 2 MONTHS 1 MONTH CURRENT DUES MINIMUM DUES
+(if any) C0.00 C0.00 C0.00 C0.00 C8,640.00 C8,640.00
+l If the minimum amount due or part amount less than the total amount due is paid, interest charges are applicable.
+Insurance provider: HDFC ERGO. Toll Free: +800 8250825/1204507250 (Chargeable)
+"""
+
 # YES Bank Klick puts dues on the line below the label row (live July-2026 layout).
 YESBANK_KLICK = """
 Credit Card Statement

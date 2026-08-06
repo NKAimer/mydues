@@ -19,7 +19,9 @@ from ..text import (
     DATE_RE,
     find_card_last4,
     find_card_tail,
+    is_money_shaped_match,
     parse_amount,
+    parse_amount_meta,
     parse_amounts,
     parse_date,
     parse_statement_date,
@@ -101,6 +103,11 @@ class Token:
     kind: str
     value: object
     column: int
+    money_shaped: bool = False
+
+
+# value, label, money_shaped (amount fields), from_table
+FieldResult = tuple[object, str, bool, bool]
 
 
 def _label_regex(label: str) -> re.Pattern[str]:
@@ -161,6 +168,8 @@ def _tokenize(line: str) -> list[Token]:
 
     Dates are claimed first so that 05/08/2026 is not read as the number 5.
     """
+    from ..text import _is_phone_or_padded_id, _is_reference_id
+
     claimed: list[tuple[int, int]] = []
     tokens: list[Token] = []
 
@@ -175,15 +184,29 @@ def _tokenize(line: str) -> list[Token]:
             continue
         if any(match.start() < end and match.end() > start for start, end in claimed):
             continue
+        if _is_reference_id(match, line) or _is_phone_or_padded_id(match, line):
+            continue
         value = parse_amount(match.group(0))
         if value is not None:
-            tokens.append(Token(AMOUNT, value, match.start()))
+            tokens.append(
+                Token(
+                    AMOUNT,
+                    value,
+                    match.start(),
+                    money_shaped=is_money_shaped_match(match),
+                )
+            )
 
     tokens.sort(key=lambda token: token.column)
     return tokens
 
 
-def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object, str]]:
+def _pack(hit: LabelHit, token: Token, *, from_table: bool) -> FieldResult:
+    shaped = token.money_shaped if token.kind == AMOUNT else False
+    return (token.value, hit.label, shaped, from_table)
+
+
+def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, FieldResult]:
     """Pair a row of labels with the row of values beneath it.
 
     Equal counts pair up in order. Otherwise each label takes the closest
@@ -207,12 +230,15 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
         and len(ordered) == len(tokens)
         and all(FIELD_KIND[hit.field] == token.kind for hit, token in zip(ordered, tokens))
     ):
-        return {hit.field: (token.value, hit.label) for hit, token in zip(ordered, tokens)}
+        return {
+            hit.field: _pack(hit, token, from_table=True)
+            for hit, token in zip(ordered, tokens)
+        }
 
     if len(tokens) < len(ordered):
         return {}
 
-    result: dict[str, tuple[object, str]] = {}
+    result: dict[str, FieldResult] = {}
     used: set[int] = set()
     last_column = -1
     deferred_dates: list[LabelHit] = []
@@ -248,12 +274,12 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
                 index, token = date_tokens[1]
                 used.add(index)
                 last_column = token.column
-                result[hit.field] = (token.value, hit.label)
+                result[hit.field] = _pack(hit, token, from_table=True)
                 continue
         index, token = min(candidates, key=lambda item: abs(item[1].column - hit.column))
         used.add(index)
         last_column = token.column
-        result[hit.field] = (token.value, hit.label)
+        result[hit.field] = _pack(hit, token, from_table=True)
 
     if deferred_dates:
         remaining_dates = [
@@ -264,7 +290,7 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
         if len(remaining_dates) >= len(deferred_dates):
             for hit, (index, token) in zip(deferred_dates, remaining_dates):
                 used.add(index)
-                result[hit.field] = (token.value, hit.label)
+                result[hit.field] = _pack(hit, token, from_table=True)
         else:
             for hit in deferred_dates:
                 candidates = [
@@ -278,13 +304,13 @@ def _align(hits: list[LabelHit], tokens: list[Token]) -> dict[str, tuple[object,
                     candidates, key=lambda item: abs(item[1].column - hit.column)
                 )
                 used.add(index)
-                result[hit.field] = (token.value, hit.label)
+                result[hit.field] = _pack(hit, token, from_table=True)
     return result
 
 
-def _extract_from_tables(text: str, hits: list[LabelHit]) -> dict[str, tuple[object, str]]:
+def _extract_from_tables(text: str, hits: list[LabelHit]) -> dict[str, FieldResult]:
     lines = text.split("\n")
-    found: dict[str, tuple[object, str]] = {}
+    found: dict[str, FieldResult] = {}
 
     by_line: dict[int, list[LabelHit]] = {}
     for hit in hits:
@@ -316,9 +342,9 @@ def _is_period_label(label: str) -> bool:
 
 def _extract_inline(
     text: str, hits: list[LabelHit], header_lines: set[int]
-) -> dict[str, tuple[object, str]]:
+) -> dict[str, FieldResult]:
     """Read the value that sits right after each label."""
-    found: dict[str, tuple[object, str]] = {}
+    found: dict[str, FieldResult] = {}
     starts = sorted(hit.start for hit in hits)
     # Prefer a real Statement Date / Closing Date over Statement Period.
     ordered_hits = sorted(
@@ -341,16 +367,20 @@ def _extract_inline(
         window = text[hit.end : min(hit.end + INLINE_WINDOW, next_label)]
         window = re.split(r"\n\s*\n", window)[0]
 
+        money_shaped = False
         if FIELD_KIND[hit.field] == AMOUNT:
             # A date after the label must not be read as a number.
-            value = parse_amount(DATE_RE.sub(" ", window))
+            meta = parse_amount_meta(DATE_RE.sub(" ", window))
+            if meta is None:
+                continue
+            value, money_shaped = meta
         elif hit.field == "statement_date":
             value = parse_statement_date(window, label=hit.label)
         else:
             value = parse_date(window)
 
         if value is not None:
-            found[hit.field] = (value, hit.label)
+            found[hit.field] = (value, hit.label, money_shaped, False)
 
     return found
 
@@ -363,9 +393,24 @@ def _label_rank(labels: dict[str, tuple[str, ...]], field: str, label: str) -> i
         return len(preferred) + 1
 
 
+def _field_score(
+    result: FieldResult,
+    *,
+    label_map: dict[str, tuple[str, ...]],
+    field: str,
+) -> tuple:
+    """Higher is better: money-shaped, table header, preferred label wording."""
+    _value, label, money_shaped, from_table = result
+    return (
+        1 if money_shaped else 0,
+        1 if from_table else 0,
+        -_label_rank(label_map, field, label),
+    )
+
+
 def extract_fields(
     text: str, labels: dict[str, tuple[str, ...]] | None = None
-) -> dict[str, tuple[object, str]]:
+) -> dict[str, FieldResult]:
     label_map = labels or DEFAULT_LABELS
     hits = _collect_hits(text, label_map)
 
@@ -388,12 +433,11 @@ def extract_fields(
         ):
             values[field] = result
             continue
-        # Prefer earlier wording in the issuer label list (Total Payment Due
-        # over a later Net Outstanding hit). Table values win ties: Axis and
-        # similar layouts put the real figures under a multi-label header, while
-        # later inline hits are often formula lines or T&C examples.
-        if _label_rank(label_map, field, result[1]) <= _label_rank(
-            label_map, field, existing[1]
+        # Prefer money-shaped / table amounts over bare late T&C integers; then
+        # earlier wording in the issuer label list (Total Payment Due over a
+        # later Net Outstanding hit).
+        if _field_score(result, label_map=label_map, field=field) >= _field_score(
+            existing, label_map=label_map, field=field
         ):
             values[field] = result
     return values
@@ -430,7 +474,7 @@ class StatementParser:
             card_tail=find_card_tail(text),
             issuer=self.issuer_key or issuers.detect(text),
             parser=self.key,
-            matched_labels={field: label for field, (_, label) in values.items()},
+            matched_labels={field: label for field, (_, label, *_) in values.items()},
         )
         self._repair_min_due(statement, text)
         self._repair_due_date(statement, text, values)
@@ -467,7 +511,7 @@ class StatementParser:
         self,
         statement: ParsedStatement,
         text: str,
-        values: dict[str, tuple[object, str]],
+        values: dict[str, FieldResult],
     ) -> None:
         """Drop a due date that is clearly not for this cycle.
 
@@ -497,11 +541,11 @@ class StatementParser:
         statement.matched_labels.pop("due_date", None)
 
     @staticmethod
-    def _amount(values: dict[str, tuple[object, str]], field: str) -> float | None:
+    def _amount(values: dict[str, FieldResult], field: str) -> float | None:
         found = values.get(field)
         return float(found[0]) if found and not isinstance(found[0], date) else None
 
     @staticmethod
-    def _date(values: dict[str, tuple[object, str]], field: str) -> date | None:
+    def _date(values: dict[str, FieldResult], field: str) -> date | None:
         found = values.get(field)
         return found[0] if found and isinstance(found[0], date) else None

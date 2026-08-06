@@ -8,8 +8,10 @@ higher bar.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from statistics import median
 
 from .models import ParsedStatement, StatementRecord
+from .text import looks_phone_like_amount
 
 # Non-zero bills should usually carry line items; below this, an empty txn
 # list is fine (settled / credit-only cycles).
@@ -17,6 +19,9 @@ _NONEMPTY_BILL = 1.0
 _TOTAL_DRIFT = 1.0  # rupees
 # "Previous balance"-style stub that must not replace a real bill on reparse.
 _TINY_TOTAL = 1000.0
+# Jump gate: new total vs recent history (phone misreads are usually 20×+).
+_ABSURD_JUMP_FACTOR = 20.0
+_ABSURD_JUMP_FLOOR = 1_000_000.0
 
 
 @dataclass(frozen=True)
@@ -73,6 +78,34 @@ def confidence(statement: ParsedStatement) -> float:
         bool(statement.transactions) or abs(statement.total_due or 0.0) < _NONEMPTY_BILL,
     ]
     return sum(1 for ok in checks if ok) / len(checks)
+
+
+def absurd_total_reason(
+    statement: ParsedStatement,
+    *,
+    recent_totals: list[float] | None = None,
+) -> str | None:
+    """Why a parsed total looks like a phone misread or absurd jump, or None."""
+    total = statement.total_due
+    if looks_phone_like_amount(total):
+        return f"total due looks like a phone number ({total:.0f})"
+
+    if recent_totals is None or len(recent_totals) < 2 or total is None:
+        return None
+
+    positives = [abs(v) for v in recent_totals if v is not None]
+    if len(positives) < 2:
+        return None
+    baseline = median(positives)
+    if baseline <= 0:
+        return None
+    new_abs = abs(float(total))
+    if new_abs >= _ABSURD_JUMP_FLOOR and new_abs > baseline * _ABSURD_JUMP_FACTOR:
+        return (
+            f"total due jumped {baseline:.2f} → {new_abs:.2f} "
+            f"(>{_ABSURD_JUMP_FACTOR:.0f}× recent median)"
+        )
+    return None
 
 
 def reparse_regression(

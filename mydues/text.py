@@ -70,6 +70,14 @@ def normalize(text: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text)
 
 
+_PHONE_CONTEXT_RE = re.compile(
+    r"(?i)toll\s*free|\bphone\b|\bcall\b|\+\s*80\d|\bivr\b|\bhelpline\b"
+)
+
+# Dial-ish integers that are not formatted as Indian currency.
+_PHONE_LIKE_DIGITS = frozenset(range(7, 9))  # 7–8 digits
+
+
 def _is_reference_id(match: re.Match[str], raw: str) -> bool:
     """True for statement numbers mistaken for money (e.g. STMT No. A25122229867)."""
     num = match.group("num") or ""
@@ -81,44 +89,86 @@ def _is_reference_id(match: re.Match[str], raw: str) -> bool:
     return bool(re.search(r"(?i)(?:STMT|Statement)\s*No\.?", prefix))
 
 
-def _is_phone_or_padded_id(match: re.Match[str]) -> bool:
-    """True for dial strings like 08250825 (HDFC ERGO Toll Free), not rupees."""
+def is_money_shaped_match(match: re.Match[str]) -> bool:
+    """True when the match looks like printed money, not a bare dial string."""
+    num = match.group("num") or ""
+    if "," in num or "." in num:
+        return True
+    # Currency marker on the match (C / Rs / ₹ / INR).
+    span = match.group(0) or ""
+    return bool(re.search(_CURRENCY, span, re.IGNORECASE))
+
+
+def _is_phone_or_padded_id(match: re.Match[str], raw: str) -> bool:
+    """True for dial strings like 08250825 / Toll Free 8250825, not rupees."""
     num = match.group("num") or ""
     if "," in num or "." in num or len(num) <= 1:
         return False
-    return num.startswith("0") and not num.startswith("0.")
+    if num.startswith("0") and not num.startswith("0."):
+        return True
+    if len(num) in _PHONE_LIKE_DIGITS and not is_money_shaped_match(match):
+        return True
+    start, end = match.start(), match.end()
+    window = raw[max(0, start - 60) : min(len(raw), end + 60)]
+    return bool(_PHONE_CONTEXT_RE.search(window))
+
+
+def looks_phone_like_amount(value: float | None) -> bool:
+    """True for integer-valued totals in the dial-string ballpark (e.g. 8250825)."""
+    if value is None:
+        return False
+    magnitude = abs(float(value))
+    if magnitude != int(magnitude):
+        return False
+    digits = len(str(int(magnitude)))
+    return digits in _PHONE_LIKE_DIGITS and 1_000_000 <= magnitude <= 99_999_999
+
+
+def _amount_from_match(match: re.Match[str]) -> float | None:
+    try:
+        value = float(match.group("num").replace(",", ""))
+    except ValueError:
+        return None
+    suffix = (match.group("suffix") or "").lower()
+    if match.group("sign") or suffix == "cr":
+        value = -value
+    return value
 
 
 def parse_amount(raw: str) -> float | None:
     """Return a signed amount. A Cr suffix means the issuer owes you."""
-    for match in AMOUNT_RE.finditer(raw or ""):
-        if _is_reference_id(match, raw or "") or _is_phone_or_padded_id(match):
+    text = raw or ""
+    for match in AMOUNT_RE.finditer(text):
+        if _is_reference_id(match, text) or _is_phone_or_padded_id(match, text):
             continue
-        try:
-            value = float(match.group("num").replace(",", ""))
-        except ValueError:
+        value = _amount_from_match(match)
+        if value is not None:
+            return value
+    return None
+
+
+def parse_amount_meta(raw: str) -> tuple[float, bool] | None:
+    """Like parse_amount, plus whether the winning match was money-shaped."""
+    text = raw or ""
+    for match in AMOUNT_RE.finditer(text):
+        if _is_reference_id(match, text) or _is_phone_or_padded_id(match, text):
             continue
-        suffix = (match.group("suffix") or "").lower()
-        if match.group("sign") or suffix == "cr":
-            value = -value
-        return value
+        value = _amount_from_match(match)
+        if value is not None:
+            return value, is_money_shaped_match(match)
     return None
 
 
 def parse_amounts(raw: str) -> list[float]:
     """Every plausible money amount in `raw`, skipping statement/reference ids."""
+    text = raw or ""
     found: list[float] = []
-    for match in AMOUNT_RE.finditer(raw or ""):
-        if _is_reference_id(match, raw or "") or _is_phone_or_padded_id(match):
+    for match in AMOUNT_RE.finditer(text):
+        if _is_reference_id(match, text) or _is_phone_or_padded_id(match, text):
             continue
-        try:
-            value = float(match.group("num").replace(",", ""))
-        except ValueError:
-            continue
-        suffix = (match.group("suffix") or "").lower()
-        if match.group("sign") or suffix == "cr":
-            value = -value
-        found.append(value)
+        value = _amount_from_match(match)
+        if value is not None:
+            found.append(value)
     return found
 
 

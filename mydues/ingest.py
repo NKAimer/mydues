@@ -147,6 +147,15 @@ def store(
             None,
         )
 
+    recent = [
+        float(row.total_due)
+        for row in db.statements_for_card(conn, card.id)
+        if row.total_due is not None
+    ]
+    absurd = parse_quality.absurd_total_reason(statement, recent_totals=recent)
+    if absurd:
+        return STATUS_ERROR, f"Refused to store: {absurd}", card.id
+
     quality = parse_quality.assess(statement)
     note = None
     if quality.transactions_incomplete:
