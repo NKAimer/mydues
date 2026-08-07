@@ -322,6 +322,29 @@ def test_parse_alert_skips_loan_offers():
     )
 
 
+def test_kotak811_upi_payment_not_blocked_by_loan_footer():
+    """Kotak811 UPI success mail footers mention Personal Loan — still a spend."""
+    expense = expense_ingest.parse_alert_email(
+        subject="Payment of INR 78.75 successful",
+        body=(
+            "Dear customer, You have successfully made a UPI payment of INR 78.75 "
+            "towards CTRLX TECHNOLOGIES PRIVATE LIMITED through the Kotak811 App. "
+            "More details below. UPI ID: cf.ctrlxtechnologiesp1@cashfreensdlpb "
+            "Date: 07-Aug-26 UPI Reference Number: 658526432847 "
+            "Have concerns regarding this payment? "
+            "Mutual funds investments are subject to market risks. "
+            "Personal Loan will not be disbursed if the Savings Account is in "
+            "dormant or freeze state. Credit at the sole discretion of Kotak."
+        ),
+        received_at=datetime(2026, 8, 7, 20, 11),
+    )
+    assert expense is not None
+    assert expense.amount == pytest.approx(78.75)
+    assert expense.spent_on == date(2026, 8, 7)
+    assert "CTRLX" in expense.description.upper()
+    assert "through the Kotak811" not in expense.description
+
+
 def test_parse_alert_skips_imps_and_neft_transfers():
     assert (
         expense_ingest.parse_alert_email(

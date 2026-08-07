@@ -33,7 +33,7 @@ DEFAULT_PAYEE_CUES = (
 _CUE_STOP_AHEAD = (
     r"(?=\s+Axis\s+Bank|\s+Credit\s+Card|\s+Date\b|\s+Available|"
     r"\s+Card\s+No|\s+Transaction\b|\s+on\s+\d|\s+at\s+\d|"
-    r"\s+via\s+|\s+using\s+|\s+ref(?:erence)?\b|[.,]|$)"
+    r"\s+via\s+|\s+using\s+|\s+through\s+|\s+ref(?:erence)?\b|[.,]|$)"
 )
 
 
@@ -68,6 +68,10 @@ ALERT_SUBJECT_HINTS = (
     "paid via upi",
     "sent using upi",
     "sent via upi",
+    # Kotak811 / bank app UPI confirmations.
+    "payment of inr",
+    "payment of rs",
+    "payment successful",
 )
 
 # Full statement subjects — never treat these as expenses.
@@ -111,6 +115,26 @@ _LOAN_OFFER_RE = re.compile(
     r"|cash\s+loan"
     r")\b"
 )
+
+# Kotak811 / bank footers mention "Personal Loan will not be disbursed…" — not offers.
+_LOAN_DISCLAIMER_RE = re.compile(
+    r"(?i)will\s+not\s+be\s+disbursed|subject\s+to\s+(?:guidelines|market\s+risks)|"
+    r"credit\s+at\s+the\s+sole\s+discretion|read\s+all\s+scheme"
+)
+
+def _is_loan_offer_blob(blob: str) -> bool:
+    """True for loan/EMI promo mail, not regulatory footers that mention loans."""
+    for match in _LOAN_OFFER_RE.finditer(blob or ""):
+        # Footers often trail the real alert; ignore matches in the last third
+        # when the message is long enough to have a marketing disclaimer.
+        if len(blob) > 600 and match.start() > len(blob) * 2 // 3:
+            continue
+        window = blob[match.start() : match.start() + 120]
+        if _LOAN_DISCLAIMER_RE.search(window):
+            continue
+        return True
+    return False
+
 
 _TRANSFER_TYPE_RE = re.compile(r"(?i)\b(?:imps|neft)\b")
 
@@ -182,7 +206,8 @@ _MERCHANT_PATTERNS = (
     ),
     re.compile(
         r"(?i)(?:spent\s+at|paid\s+to|towards|info\s*:|merchant\s*:)\s+"
-        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80}?)"
+        r"(?=\s+on\s+\d|\s+via\s+|\s+using\s+|\s+through\s+|\s+ref(?:erence)?\b|[.,]|$)"
     ),
     re.compile(
         r"(?i)\bUPI[_/]+([A-Za-z][A-Za-z0-9 &.'@/_-]{1,60})"
@@ -531,7 +556,7 @@ def parse_alert_email(
 
     body_plain = _strip_html(body)
     blob = f"{subject}\n{body_plain}"
-    if _LOAN_OFFER_RE.search(blob):
+    if _is_loan_offer_blob(blob):
         return None
     if _TRANSFER_TYPE_RE.search(blob):
         return None
