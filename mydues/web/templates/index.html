@@ -9,6 +9,8 @@
   <title>Expenses — Mydues</title>
   {% elif tab == 'categories' %}
   <title>Categories — Mydues</title>
+  {% elif tab == 'planner' %}
+  <title>Planner — Mydues</title>
   {% else %}
   <title>Credit cards — Mydues</title>
   {% endif %}
@@ -38,7 +40,7 @@
         {% else %}
           <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
         {% endif %}
-      {% elif tab == 'categories' %}
+      {% elif tab == 'categories' or tab == 'planner' %}
         {% if gmail_connected %}
           <form method="post" action="{{ url_for('auth_disconnect') }}">
             <button class="btn subtle" type="submit">Disconnect Gmail</button>
@@ -76,11 +78,216 @@
        href="{{ url_for('index', tab='cards', month=expense_month_key) }}">Credit cards</a>
     <a class="tab {% if tab == 'expenses' %}active{% endif %}"
        href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">Expenses</a>
+    <a class="tab {% if tab == 'planner' %}active{% endif %}"
+       href="{{ url_for('index', tab='planner', month=expense_month_key) }}">Planner</a>
     <a class="tab {% if tab == 'categories' %}active{% endif %}"
        href="{{ url_for('index', tab='categories') }}">Categories</a>
   </nav>
 
-  {% if tab == 'expenses' %}
+  {% if tab == 'planner' %}
+
+  <section class="month-nav">
+    <a class="btn subtle" href="{{ url_for('index', tab='planner', month=planner_prev_month) }}">← Prev</a>
+    <h2 class="month-label">{{ planner.plan_month_label }}</h2>
+    <a class="btn subtle" href="{{ url_for('index', tab='planner', month=planner_next_month) }}">Next →</a>
+  </section>
+
+  <p class="planner-lead">Salary credited at the end of the prior month funds this plan month.</p>
+
+  <section class="summary">
+    <div class="stat">
+      <span class="stat-label">Salary</span>
+      <span class="stat-value">{{ planner.salary | inr }}</span>
+      {% if planner.credited_on %}
+        <span class="stat-foot">Credited {{ planner.credited_on | dmy }}</span>
+      {% endif %}
+    </div>
+    <div class="stat">
+      <span class="stat-label">Planned outflows</span>
+      <span class="stat-value">{{ planner.outflows | inr }}</span>
+      <span class="stat-foot">Recurring {{ planner.recurring_total | inr }} · Extras {{ planner.planned_total | inr }}</span>
+    </div>
+    <div class="stat {% if planner.savings < 0 %}stat-warn{% endif %}">
+      <span class="stat-label">Planned savings</span>
+      <span class="stat-value">{{ planner.savings | inr }}</span>
+      <span class="stat-foot">Salary − planned outflows</span>
+    </div>
+    <div class="stat {% if planner.actual_vs_planned > 0 %}stat-warn{% endif %}">
+      <span class="stat-label">Actual vs planned</span>
+      <span class="stat-value">{{ planner.actual_spend | inr }}</span>
+      <span class="stat-foot">
+        Gmail/manual spend
+        {% if planner.actual_vs_planned > 0 %}
+          · {{ planner.actual_vs_planned | inr }} over plan
+        {% elif planner.actual_vs_planned < 0 %}
+          · {{ (-planner.actual_vs_planned) | inr }} under plan
+        {% else %}
+          · on plan
+        {% endif %}
+      </span>
+    </div>
+  </section>
+
+  <section class="panel" id="planner-salary">
+    <h2>Salary for {{ planner.plan_month_label }}</h2>
+    <p class="sub">Enter the amount credited late last month (default credit day {{ planner_default_credit | dmy }}).</p>
+    <form method="post" action="{{ url_for('planner_save_income') }}" class="grid-form wide">
+      <input type="hidden" name="month" value="{{ planner.plan_month }}">
+      <label>Amount
+        <input type="text" name="amount" inputmode="decimal" required
+               value="{{ '%.2f'|format(planner.salary) if planner.has_income else '' }}"
+               placeholder="e.g. 120000">
+      </label>
+      <label>Credited on
+        <input type="date" name="credited_on"
+               value="{{ (planner.credited_on or planner_default_credit).isoformat() }}">
+      </label>
+      <label>Note
+        <input type="text" name="note" value="{{ planner.salary_note or '' }}" placeholder="optional">
+      </label>
+      <div class="form-actions">
+        <button class="btn primary" type="submit">Save salary</button>
+        <button class="btn subtle" type="submit" formaction="{{ url_for('planner_copy_income') }}" formnovalidate>Same as last month</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel" id="planner-recurring">
+    <div class="panel-head">
+      <h2>Recurring expenses</h2>
+      <form method="post" action="{{ url_for('planner_seed_defaults') }}">
+        <input type="hidden" name="month" value="{{ planner.plan_month }}">
+        <button class="btn subtle" type="submit">Add defaults (Rent, Electricity, Wifi, Mobile)</button>
+      </form>
+    </div>
+    {% if planner.recurrings %}
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Amount</th>
+          <th>Day</th>
+          <th>Active</th>
+          <th>This month</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in planner.recurrings %}
+        <tr class="{% if row.paid %}row-paid{% endif %}{% if not row.active %} row-muted{% endif %}">
+          <td colspan="6">
+            <form method="post" action="{{ url_for('planner_edit_recurring', recurring_id=row.id) }}" class="inline-edit-row">
+              <input type="hidden" name="month" value="{{ planner.plan_month }}">
+              <input type="text" name="label" value="{{ row.label }}" required aria-label="Label">
+              <input type="text" name="amount" value="{{ '%.2f'|format(row.amount) }}" inputmode="decimal" required aria-label="Amount">
+              <input type="number" name="day_of_month" min="1" max="31" value="{{ row.day_of_month or '' }}" aria-label="Day of month" placeholder="—">
+              <label class="check-inline"><input type="checkbox" name="active" value="1" {% if row.active %}checked{% endif %}> Active</label>
+              <button class="btn subtle" type="submit">Save</button>
+            </form>
+            <div class="row-actions">
+              <form method="post" action="{{ url_for('planner_toggle_paid', recurring_id=row.id) }}">
+                <input type="hidden" name="month" value="{{ planner.plan_month }}">
+                <input type="hidden" name="paid" value="{{ '0' if row.paid else '1' }}">
+                <button class="btn subtle" type="submit">{{ 'Clear paid' if row.paid else 'Mark paid' }}</button>
+              </form>
+              <form method="post" action="{{ url_for('planner_delete_recurring', recurring_id=row.id) }}" onsubmit="return confirm('Delete this recurring?');">
+                <input type="hidden" name="month" value="{{ planner.plan_month }}">
+                <button class="btn subtle" type="submit">Delete</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="sub">No recurrings yet. Add defaults or create your own.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('planner_add_recurring') }}" class="grid-form wide">
+      <input type="hidden" name="month" value="{{ planner.plan_month }}">
+      <label>Label <input type="text" name="label" required placeholder="Rent"></label>
+      <label>Amount <input type="text" name="amount" inputmode="decimal" required></label>
+      <label>Due day <input type="number" name="day_of_month" min="1" max="31" placeholder="1–31"></label>
+      <button class="btn primary" type="submit">Add recurring</button>
+    </form>
+  </section>
+
+  {% if planner.timeline %}
+  <section class="panel" id="planner-timeline">
+    <h2>Due-day calendar</h2>
+    <p class="sub">Active recurrings with a day of month, in order.</p>
+    <ol class="due-timeline">
+      {% for row in planner.timeline %}
+      <li class="{% if row.paid %}is-paid{% endif %}">
+        <span class="due-day">{{ '%02d'|format(row.day_of_month) }}</span>
+        <span class="due-label">{{ row.label }}</span>
+        <span class="due-amount">{{ row.amount | inr }}</span>
+        {% if row.paid %}<span class="due-paid">Paid</span>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+  </section>
+  {% endif %}
+
+  <section class="panel" id="planner-planned">
+    <h2>One-off planned expenses</h2>
+    {% if planner.planned %}
+    <ul class="planner-list">
+      {% for row in planner.planned %}
+      <li>
+        <span>{{ row.label }}</span>
+        <span>{{ row.amount | inr }}</span>
+        <form method="post" action="{{ url_for('planner_delete_planned', planned_id=row.id) }}">
+          <input type="hidden" name="month" value="{{ planner.plan_month }}">
+          <button class="btn subtle" type="submit">Remove</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <form method="post" action="{{ url_for('planner_add_planned') }}" class="grid-form wide">
+      <input type="hidden" name="month" value="{{ planner.plan_month }}">
+      <label>Label <input type="text" name="label" required placeholder="Trip / gift / …"></label>
+      <label>Amount <input type="text" name="amount" inputmode="decimal" required></label>
+      <button class="btn primary" type="submit">Add planned</button>
+    </form>
+  </section>
+
+  <section class="panel" id="planner-goals">
+    <h2>Savings goals</h2>
+    <p class="sub">Pace uses this month’s planned savings.</p>
+    {% if planner.goals %}
+    <ul class="planner-list goals-list">
+      {% for goal in planner.goals %}
+      <li>
+        <div>
+          <strong>{{ goal.label }}</strong>
+          <span class="sub">Target {{ goal.target_amount | inr }}
+            {% if goal.months_at_pace %}
+              · ~{{ goal.months_at_pace }} month{{ '' if goal.months_at_pace == 1 else 's' }} at this pace
+            {% elif planner.savings <= 0 %}
+              · need positive savings
+            {% endif %}
+          </span>
+          <div class="meter" aria-hidden="true"><div class="meter-fill" style="width: {{ goal.pct }}%"></div></div>
+        </div>
+        <form method="post" action="{{ url_for('planner_delete_goal', goal_id=goal.id) }}">
+          <input type="hidden" name="month" value="{{ planner.plan_month }}">
+          <button class="btn subtle" type="submit">Remove</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <form method="post" action="{{ url_for('planner_add_goal') }}" class="grid-form wide">
+      <input type="hidden" name="month" value="{{ planner.plan_month }}">
+      <label>Goal <input type="text" name="label" required placeholder="Emergency fund / MF"></label>
+      <label>Target <input type="text" name="target_amount" inputmode="decimal" required></label>
+      <button class="btn primary" type="submit">Add goal</button>
+    </form>
+  </section>
+
+  {% elif tab == 'expenses' %}
 
   {% if not gmail_connected %}
   <section class="panel empty-state">
@@ -1143,6 +1350,54 @@
     <a href="{{ url_for('api_dues') }}">JSON</a>
   </footer>
 </div>
+
+<aside class="calc-rail" id="calc-rail" aria-label="Scratch calculator" data-calc-rail>
+  <button type="button" class="calc-chip" data-calc-toggle aria-expanded="false" aria-controls="calc-panel">Calc</button>
+  <div class="calc-panel" id="calc-panel" hidden>
+    <div class="calc-panel-head">
+      <h2>Calculator</h2>
+      <button type="button" class="btn subtle calc-close" data-calc-toggle>Close</button>
+    </div>
+    <input type="text" class="calc-display" data-calc-display readonly value="0" aria-live="polite">
+    <div class="calc-pad" data-calc-pad>
+      <button type="button" data-calc-key="C">C</button>
+      <button type="button" data-calc-key="⌫">⌫</button>
+      <button type="button" data-calc-key="%">%</button>
+      <button type="button" data-calc-key="/">÷</button>
+      <button type="button" data-calc-key="7">7</button>
+      <button type="button" data-calc-key="8">8</button>
+      <button type="button" data-calc-key="9">9</button>
+      <button type="button" data-calc-key="*">×</button>
+      <button type="button" data-calc-key="4">4</button>
+      <button type="button" data-calc-key="5">5</button>
+      <button type="button" data-calc-key="6">6</button>
+      <button type="button" data-calc-key="-">−</button>
+      <button type="button" data-calc-key="1">1</button>
+      <button type="button" data-calc-key="2">2</button>
+      <button type="button" data-calc-key="3">3</button>
+      <button type="button" data-calc-key="+">+</button>
+      <button type="button" data-calc-key="0" class="span-2">0</button>
+      <button type="button" data-calc-key=".">.</button>
+      <button type="button" data-calc-key="=">=</button>
+    </div>
+    <div class="calc-history" data-calc-history>
+      <div class="calc-history-head">
+        <span>History</span>
+        <button type="button" class="btn subtle calc-history-clear" data-calc-history-clear>Clear history</button>
+      </div>
+      <ul class="calc-history-list" data-calc-history-list></ul>
+    </div>
+    <div class="calc-whatif">
+      <label>What-if savings
+        <span class="calc-whatif-row">
+          Salary <input type="text" data-whatif-salary inputmode="decimal" placeholder="0">
+          − Out <input type="text" data-whatif-out inputmode="decimal" placeholder="0">
+        </span>
+      </label>
+      <p class="calc-whatif-result" data-whatif-result>Savings: —</p>
+    </div>
+  </div>
+</aside>
 
   <datalist id="known-categories">
     {% for label in known_categories %}
