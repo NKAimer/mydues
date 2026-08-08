@@ -259,12 +259,58 @@ def test_parse_hdfc_payment_was_made_alert():
             "Credit Card ending 6527 towards SWIGGY PVT LTD FOOD2 on 01 Aug, 2026 "
             "at 20:36:36."
         ),
-        received_at=datetime(2026, 8, 1, 20, 36),
+        received_at=datetime(2026, 8, 1, 21, 0),
     )
     assert expense is not None
     assert expense.amount == pytest.approx(335.0)
     assert expense.spent_on == date(2026, 8, 1)
+    assert expense.spent_at == datetime(2026, 8, 1, 20, 36, 36)
     assert "SWIGGY" in expense.description.upper()
+
+
+def test_parse_alert_spent_at_falls_back_to_received_at():
+    expense = expense_ingest.parse_alert_email(
+        subject="UPI payment of Rs.2550.00",
+        body="You paid Rs.2550.00 to MERCHANT STORE via UPI on 25-07-2026.",
+        received_at=datetime(2026, 7, 25, 14, 5, 0),
+    )
+    assert expense is not None
+    assert expense.spent_on == date(2026, 7, 25)
+    assert expense.spent_at == datetime(2026, 7, 25, 14, 5, 0)
+
+
+def test_parse_alert_time_prefers_at_over_earlier_bare_time():
+    expense = expense_ingest.parse_alert_email(
+        subject="A payment was made using your Credit Card",
+        body=(
+            "Customer care 10:00 to 18:00. Rs. 335.00 debited towards SWIGGY "
+            "on 01 Aug, 2026 at 20:36:36."
+        ),
+        received_at=datetime(2026, 8, 1, 21, 0),
+    )
+    assert expense is not None
+    assert expense.spent_at == datetime(2026, 8, 1, 20, 36, 36)
+
+
+def test_parse_alert_spent_at_keeps_spent_on_when_received_next_day():
+    expense = expense_ingest.parse_alert_email(
+        subject="UPI payment of Rs.100.00",
+        body="You paid Rs.100.00 to CAFE via UPI on 25-07-2026.",
+        received_at=datetime(2026, 7, 26, 0, 5, 0),
+    )
+    assert expense is not None
+    assert expense.spent_on == date(2026, 7, 25)
+    assert expense.spent_at == datetime(2026, 7, 25, 0, 5, 0)
+
+
+def test_parse_alert_spent_at_none_without_time_or_received():
+    expense = expense_ingest.parse_alert_email(
+        subject="UPI payment of Rs.100.00",
+        body="You paid Rs.100.00 to CAFE via UPI on 25-07-2026.",
+    )
+    assert expense is not None
+    assert expense.spent_on == date(2026, 7, 25)
+    assert expense.spent_at is None
 
 
 def test_parse_sbi_phonepe_spent_at_merchant():
@@ -428,7 +474,7 @@ def test_refresh_expense_from_gmail_updates_bad_description(conn, monkeypatch):
     expense_id = db.add_expense(
         conn,
         Expense(
-            spent_on=date(2026, 8, 1),
+            spent_on=date(2026, 7, 31),
             amount=1250.0,
             description="confirm that your Credit card no ending with 7672",
             category=None,
@@ -444,7 +490,8 @@ def test_refresh_expense_from_gmail_updates_bad_description(conn, monkeypatch):
         internal_date=int(datetime(2026, 8, 1, 10, 0).timestamp() * 1000),
         body=(
             "You have used your HSBC Credit Card ending with 7672 for a purchase "
-            "transaction of Rs.1,250.00 at APOLLO PHARMACY IND on 01-08-2026."
+            "transaction of Rs.1,250.00 at APOLLO PHARMACY IND on 01-08-2026 "
+            "at 20:36:36."
         ),
     )
     monkeypatch.setattr(gmail, "is_connected", lambda: True)
@@ -456,6 +503,8 @@ def test_refresh_expense_from_gmail_updates_bad_description(conn, monkeypatch):
     updated = db.get_expense(conn, expense_id)
     assert "APOLLO" in updated.description.upper()
     assert updated.category == "Health"
+    assert updated.spent_on == date(2026, 8, 1)
+    assert updated.spent_at == datetime(2026, 8, 1, 20, 36, 36)
 
     # Manual category is preserved on refresh.
     db.update_expense(
@@ -507,6 +556,7 @@ def test_expenses_tab_and_manual_add(client, conn):
     page = client.get("/?tab=expenses").get_data(as_text=True)
     assert "Add expense" in page
     assert 'href="/?tab=cards"' in page or "tab=cards" in page
+    assert 'name="spent_at"' in page
 
     response = client.post(
         "/expenses",
@@ -525,6 +575,89 @@ def test_expenses_tab_and_manual_add(client, conn):
     rows = db.list_expenses(conn, start=date(2026, 8, 1), end=date(2026, 9, 1))
     assert len(rows) == 1
     assert rows[0].description == "Metro card"
+    assert rows[0].spent_at is None
+
+
+def test_manual_add_and_edit_expense_time(client, conn):
+    response = client.post(
+        "/expenses",
+        data={
+            "spent_on": "01/08/2026",
+            "spent_at": "20:36",
+            "amount": "99",
+            "description": "Timed spend",
+        },
+        follow_redirects=True,
+    )
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "01/08/2026 20:36" in body
+    rows = db.list_expenses(conn, start=date(2026, 8, 1), end=date(2026, 9, 1))
+    assert len(rows) == 1
+    assert rows[0].spent_at == datetime(2026, 8, 1, 20, 36)
+
+    expense_id = rows[0].id
+    client.post(
+        f"/expenses/{expense_id}/edit",
+        data={
+            "spent_on": "01/08/2026",
+            "spent_at": "09:05",
+            "amount": "99",
+            "description": "Timed spend",
+        },
+        follow_redirects=True,
+    )
+    updated = db.get_expense(conn, expense_id)
+    assert updated is not None
+    assert updated.spent_at == datetime(2026, 8, 1, 9, 5)
+
+    client.post(
+        f"/expenses/{expense_id}/edit",
+        data={
+            "spent_on": "01/08/2026",
+            "spent_at": "",
+            "amount": "99",
+            "description": "Timed spend",
+        },
+        follow_redirects=True,
+    )
+    cleared = db.get_expense(conn, expense_id)
+    assert cleared is not None
+    assert cleared.spent_at is None
+
+
+def test_list_expenses_orders_by_spent_at(conn):
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=10,
+            description="Morning",
+            source=SOURCE_MANUAL,
+            spent_at=datetime(2026, 8, 1, 9, 0),
+        ),
+    )
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=20,
+            description="Evening",
+            source=SOURCE_MANUAL,
+            spent_at=datetime(2026, 8, 1, 21, 0),
+        ),
+    )
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 1),
+            amount=30,
+            description="No time",
+            source=SOURCE_MANUAL,
+        ),
+    )
+    rows = db.list_expenses(conn, start=date(2026, 8, 1), end=date(2026, 9, 1))
+    assert [r.description for r in rows] == ["Evening", "Morning", "No time"]
 
 
 def test_edit_and_delete_expense(client, conn):
@@ -680,6 +813,7 @@ def test_export_expenses_csv_and_json(client, conn):
             category="Food & dining",
             source=SOURCE_MANUAL,
             note="keep",
+            spent_at=datetime(2026, 8, 1, 20, 36, 36),
         ),
     )
     csv_resp = client.get("/export/expenses.csv?month=2026-08")
@@ -688,7 +822,7 @@ def test_export_expenses_csv_and_json(client, conn):
     assert "attachment" in csv_resp.headers.get("Content-Disposition", "")
     text = csv_resp.get_data(as_text=True)
     assert "spent_on,amount,description" in text.replace(" ", "") or "spent_on" in text
-    assert "01/08/2026" in text
+    assert "01/08/2026 20:36" in text
     assert "250.5" in text
     assert "source_ref" not in text
     assert "body" not in text.lower() or "SWIGGY" in text
@@ -700,6 +834,8 @@ def test_export_expenses_csv_and_json(client, conn):
     assert payload["month"] == "2026-08"
     assert len(payload["expenses"]) == 1
     assert payload["expenses"][0]["spent_on"] == "2026-08-01"
+    assert payload["expenses"][0]["spent_on_dmy"] == "01/08/2026 20:36"
+    assert payload["expenses"][0]["spent_at"] == "2026-08-01T20:36:36"
     assert "source_ref" not in payload["expenses"][0]
 
 

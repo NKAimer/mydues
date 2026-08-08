@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 CREATE TABLE IF NOT EXISTS expenses (
     id INTEGER PRIMARY KEY,
     spent_on TEXT NOT NULL,
+    spent_at TEXT,
     amount REAL NOT NULL,
     description TEXT NOT NULL,
     category TEXT,
@@ -197,6 +198,7 @@ ADDED_COLUMNS = {
     "expenses": {
         "category_source": "TEXT",
         "charge_kind": "TEXT",
+        "spent_at": "TEXT",
     },
     "transactions": {
         "charge_kind": "TEXT",
@@ -970,6 +972,7 @@ def _expense_from_row(row: sqlite3.Row) -> Expense:
         source=row["source"],
         source_ref=row["source_ref"],
         note=row["note"],
+        spent_at=_as_datetime(row["spent_at"]) if "spent_at" in keys else None,
         created_at=_as_datetime(row["created_at"]),
     )
 
@@ -981,12 +984,13 @@ def add_expense(conn: sqlite3.Connection, expense: Expense) -> int | None:
         cursor = conn.execute(
             """
             INSERT INTO expenses (
-                spent_on, amount, description, category, category_source,
+                spent_on, spent_at, amount, description, category, category_source,
                 charge_kind, source, source_ref, note, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _iso(expense.spent_on),
+                _iso(expense.spent_at),
                 expense.amount,
                 expense.description.strip(),
                 expense.category,
@@ -1036,7 +1040,10 @@ def list_expenses(
         f"""
         SELECT * FROM expenses
         WHERE {' AND '.join(clauses)}
-        ORDER BY spent_on DESC, id DESC
+        ORDER BY spent_on DESC,
+                 CASE WHEN spent_at IS NULL THEN 1 ELSE 0 END,
+                 spent_at DESC,
+                 id DESC
         """,
         params,
     ).fetchall()
@@ -1058,29 +1065,51 @@ def update_expense(
     category: str | None,
     category_source: str | None = None,
     note: str | None = None,
+    spent_at: datetime | None | object = ...,
     charge_kind: str | None | object = ...,
 ) -> bool:
     """Update editable fields; leaves source / source_ref alone. True if a row changed.
 
     ``charge_kind`` is ignored for expenses (statement transactions only).
+    Pass ``spent_at=...`` (Ellipsis) to leave the timestamp unchanged.
     """
-    cursor = conn.execute(
-        """
-        UPDATE expenses
-        SET spent_on = ?, amount = ?, description = ?, category = ?,
-            category_source = ?, note = ?, charge_kind = NULL
-        WHERE id = ?
-        """,
-        (
-            _iso(spent_on),
-            amount,
-            description.strip(),
-            category,
-            category_source,
-            note,
-            expense_id,
-        ),
-    )
+    if spent_at is ...:
+        cursor = conn.execute(
+            """
+            UPDATE expenses
+            SET spent_on = ?, amount = ?, description = ?, category = ?,
+                category_source = ?, note = ?, charge_kind = NULL
+            WHERE id = ?
+            """,
+            (
+                _iso(spent_on),
+                amount,
+                description.strip(),
+                category,
+                category_source,
+                note,
+                expense_id,
+            ),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            UPDATE expenses
+            SET spent_on = ?, spent_at = ?, amount = ?, description = ?, category = ?,
+                category_source = ?, note = ?, charge_kind = NULL
+            WHERE id = ?
+            """,
+            (
+                _iso(spent_on),
+                _iso(spent_at) if isinstance(spent_at, datetime) else None,
+                amount,
+                description.strip(),
+                category,
+                category_source,
+                note,
+                expense_id,
+            ),
+        )
     conn.commit()
     return cursor.rowcount > 0
 

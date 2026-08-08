@@ -7,7 +7,7 @@ import io
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time
 from urllib.parse import urlencode
 
 from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
@@ -71,6 +71,35 @@ def _parse_date(value: str | None) -> date | None:
 def format_dmy(value: date | datetime | None) -> str:
     """Dates are written and read the Indian way: 05/08/2026."""
     return value.strftime("%d/%m/%Y") if value is not None else ""
+
+
+def format_dmy_hm(value: date | datetime | None) -> str:
+    """Date with time when a datetime is given: 05/08/2026 20:36."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y %H:%M")
+    return value.strftime("%d/%m/%Y")
+
+
+def _parse_time_hm(value: str | None) -> time | None:
+    """Parse HH:MM or HH:MM:SS; blank → None."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            return datetime.strptime(raw, fmt).time()
+        except ValueError:
+            continue
+    return None
+
+
+def _combine_spent_at(spent_on: date, time_value: str | None) -> datetime | None:
+    clock = _parse_time_hm(time_value)
+    if clock is None:
+        return None
+    return datetime.combine(spent_on, clock)
 
 
 def _flash_reapply_stats(stats: dict[str, int]) -> None:
@@ -372,11 +401,17 @@ def _format_fetch_stamp(value: str | None) -> str:
 def _expense_export_rows(expenses: list[Expense]) -> list[dict]:
     rows = []
     for expense in expenses:
+        when = expense.spent_at or expense.spent_on
         rows.append(
             {
                 "id": expense.id,
                 "spent_on": expense.spent_on.isoformat() if expense.spent_on else None,
-                "spent_on_dmy": format_dmy(expense.spent_on),
+                "spent_on_dmy": format_dmy_hm(when),
+                "spent_at": (
+                    expense.spent_at.isoformat(timespec="seconds")
+                    if expense.spent_at
+                    else None
+                ),
                 "amount": expense.amount,
                 "description": expense.description,
                 "category": expense.category,
@@ -433,6 +468,7 @@ def create_app() -> Flask:
 
     app.jinja_env.filters["inr"] = format_inr
     app.jinja_env.filters["dmy"] = format_dmy
+    app.jinja_env.filters["dmy_hm"] = format_dmy_hm
 
     def _callback_uri() -> str:
         """Where Google should send the browser back.
@@ -1168,6 +1204,7 @@ def create_app() -> Flask:
         form = request.form
         amount = _parse_amount(form.get("amount"))
         spent_on = _parse_date(form.get("spent_on")) or date.today()
+        spent_at = _combine_spent_at(spent_on, form.get("spent_at"))
         description = (form.get("description") or "").strip()
         category = (form.get("category") or "").strip() or None
         note = (form.get("note") or "").strip() or None
@@ -1175,6 +1212,9 @@ def create_app() -> Flask:
 
         if amount is None or amount <= 0 or not description:
             flash("Enter an amount and a short description.", "error")
+            return redirect(url_for("index", tab="expenses", month=month_key))
+        if (form.get("spent_at") or "").strip() and spent_at is None:
+            flash("Time must be HH:MM (optional seconds).", "error")
             return redirect(url_for("index", tab="expenses", month=month_key))
 
         db.add_expense(
@@ -1186,6 +1226,7 @@ def create_app() -> Flask:
                 category=category,
                 category_source=CATEGORY_USER if category else None,
                 note=note,
+                spent_at=spent_at,
                 source=SOURCE_MANUAL,
             ),
         )
@@ -1200,6 +1241,7 @@ def create_app() -> Flask:
         form = request.form
         amount = _parse_amount(form.get("amount"))
         spent_on = _parse_date(form.get("spent_on")) or (existing.spent_on if existing else date.today())
+        spent_at = _combine_spent_at(spent_on, form.get("spent_at"))
         description = (form.get("description") or "").strip()
         category = (form.get("category") or "").strip() or None
         note = (form.get("note") or "").strip() or None
@@ -1213,6 +1255,11 @@ def create_app() -> Flask:
             return redirect(
                 url_for("index", tab="expenses", month=existing.spent_on.strftime("%Y-%m"))
             )
+        if (form.get("spent_at") or "").strip() and spent_at is None:
+            flash("Time must be HH:MM (optional seconds).", "error")
+            return redirect(
+                url_for("index", tab="expenses", month=existing.spent_on.strftime("%Y-%m"))
+            )
 
         db.update_expense(
             conn,
@@ -1223,6 +1270,7 @@ def create_app() -> Flask:
             category=category,
             category_source=CATEGORY_USER if category else None,
             note=note,
+            spent_at=spent_at,
         )
         if existing.description and description != existing.description:
             remember_payee_alias(conn, existing.description, description)
@@ -1608,7 +1656,7 @@ def create_app() -> Flask:
         csv_rows = [
             {
                 "id": expense.id,
-                "spent_on": format_dmy(expense.spent_on),
+                "spent_on": format_dmy_hm(expense.spent_at or expense.spent_on),
                 "amount": expense.amount,
                 "description": expense.description,
                 "category": expense.category or "",

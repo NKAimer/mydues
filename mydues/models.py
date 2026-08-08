@@ -126,4 +126,5 @@ class Expense:
     charge_kind: str | None = None
     source_ref: str | None = None
     note: str | None = None
+    spent_at: datetime | None = None
     created_at: datetime | None = None

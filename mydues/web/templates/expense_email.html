@@ -45,7 +45,7 @@
     {% endif %}
     <p class="email-meta sub">
       Linked expense: {{ expense.description }} · {{ expense.amount | inr }}
-      · {{ expense.spent_on | dmy }}
+      · {{ (expense.spent_at or expense.spent_on) | dmy_hm }}
     </p>
     <pre class="email-body">{{ body }}</pre>
   </section>

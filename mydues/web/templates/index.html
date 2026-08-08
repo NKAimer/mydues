@@ -432,7 +432,7 @@
         <tbody>
           {% for expense in expenses %}
             <tr id="expense-{{ expense.id }}" class="{{ 'row-highlight' if highlight == 'expense-' ~ expense.id }}">
-              <td data-label="Date">{{ expense.spent_on | dmy }}</td>
+              <td data-label="Date">{{ (expense.spent_at or expense.spent_on) | dmy_hm }}</td>
               <td data-label="Description">
                 {{ expense.description }}
                 {% if expense.source == 'gmail' %}<span class="pill muted">gmail</span>{% endif %}
@@ -455,6 +455,11 @@
                       <input type="text" name="spent_on" inputmode="numeric"
                              value="{{ expense.spent_on | dmy }}"
                              pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}">
+                    </label>
+                    <label>Time
+                      <input type="text" name="spent_at" inputmode="numeric"
+                             value="{{ expense.spent_at.strftime('%H:%M') if expense.spent_at else '' }}"
+                             placeholder="HH:MM" pattern="\d{1,2}:\d{2}(:\d{2})?">
                     </label>
                     <label>Amount
                       <input type="text" name="amount" inputmode="decimal"
@@ -506,6 +511,10 @@
         <input type="text" name="spent_on" inputmode="numeric"
                placeholder="dd/mm/yyyy" value="{{ today | dmy }}"
                pattern="\d{1,2}[/-]\d{1,2}[/-]\d{4}">
+      </label>
+      <label>Time
+        <input type="text" name="spent_at" inputmode="numeric"
+               placeholder="HH:MM" pattern="\d{1,2}:\d{2}(:\d{2})?">
       </label>
       <label>Amount
         <input type="text" name="amount" inputmode="decimal" placeholder="0.00" required>
