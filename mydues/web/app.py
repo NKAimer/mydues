@@ -7,7 +7,7 @@ import io
 import json
 import logging
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 
 from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
@@ -290,6 +290,20 @@ def _filter_args(args=None) -> dict:
     return out
 
 
+def _expense_scope(args=None) -> str:
+    """Expense list window: ``month`` (default) or ``all``."""
+    src = args if args is not None else request.args
+    scope = (src.get("scope") or "month").strip().lower()
+    return "all" if scope == "all" else "month"
+
+
+def _expense_list_window(month_start: date, *, scope: str) -> tuple[date, date]:
+    """Half-open [start, end) for the expense table (not month summary totals)."""
+    if scope == "all":
+        return date(1970, 1, 1), date.today() + timedelta(days=1)
+    return _month_window(month_start)
+
+
 def _filter_query(**extra) -> str:
     """Query string preserving month/tab/filters plus extras (e.g. highlight)."""
     params: dict = {}
@@ -305,6 +319,9 @@ def _filter_query(**extra) -> str:
     txns = (request.args.get("txns") or request.form.get("txns") or "").strip()
     if txns:
         params["txns"] = txns
+    scope = _expense_scope()
+    if scope == "all":
+        params["scope"] = "all"
     for key, value in _filter_args().items():
         if key == "charges_only":
             params["charges"] = "1"
@@ -519,7 +536,7 @@ def create_app() -> Flask:
         conn = db.connect()
         db.init(conn)
         tab = (request.args.get("tab") or "cards").strip().lower()
-        if tab not in {"cards", "expenses", "categories", "planner"}:
+        if tab not in {"cards", "expenses", "categories", "planner", "report"}:
             tab = "cards"
 
         # ?statement=<id> looks back at one earlier cycle; the rest stay latest.
@@ -530,10 +547,12 @@ def create_app() -> Flask:
         month_end_exclusive = _month_window(month_start)[1]
         card_start, card_end = _card_billing_window(month_start)
         filters = _filter_args()
+        expense_scope = _expense_scope()
+        list_start, list_end = _expense_list_window(month_start, scope=expense_scope)
         expenses = db.list_expenses(
-            conn, start=month_start, end=month_end_exclusive, **filters
+            conn, start=list_start, end=list_end, **filters
         )
-        # Totals ignore list filters so the month summary stays stable.
+        # Totals ignore list filters / all-months scope so the month summary stays stable.
         all_month_expenses = db.list_expenses(
             conn, start=month_start, end=month_end_exclusive
         )
@@ -549,17 +568,30 @@ def create_app() -> Flask:
         budgets = db.budget_status_for_month(
             conn, start=month_start, end=month_end_exclusive
         )
+        budget_overruns = [row for row in budgets if row.get("over")]
 
         for view in book.views:
             view.charges_cycle_total = view.charges_this_cycle
 
-        # Apply the same filters to each card's open statement table.
-        if filters:
+        # Apply filters to statement tables only for month-scoped expense filters.
+        if filters and expense_scope == "month":
             for view in book.views:
                 if view.record and view.record.id:
                     view.transactions = db.transactions_for_statement(
                         conn, view.record.id, **filters
                     )
+
+        unpaid_views = sorted(
+            [v for v in book.views if (v.outstanding or 0) > 0],
+            key=lambda v: (
+                v.due_date is None,
+                v.due_date or date.max,
+                (v.card.label or "").lower(),
+            ),
+        )
+        settled_card_count = sum(
+            1 for v in book.views if v.status == dues.STATUS_SETTLED
+        )
 
         highlight = (request.args.get("highlight") or "").strip()
         txns_flag = (request.args.get("txns") or "").strip().lower()
@@ -592,6 +624,7 @@ def create_app() -> Flask:
             callback_uri=_callback_uri(),
             expenses=expenses,
             expense_total=expense_total,
+            month_expense_count=len(all_month_expenses),
             expense_category_totals=category_spend_totals(all_month_expenses),
             expense_month=month_start,
             expense_month_key=month_start.strftime("%Y-%m"),
@@ -599,6 +632,7 @@ def create_app() -> Flask:
             expense_prev_month=_shift_month(month_start, -1).strftime("%Y-%m"),
             expense_next_month=_shift_month(month_start, 1).strftime("%Y-%m"),
             expense_months=db.expense_months(conn),
+            expense_scope=expense_scope,
             card_spend_total=card_spend_total,
             card_spend_by_card=card_spend_by_card,
             card_category_totals=category_spend_totals(
@@ -610,6 +644,9 @@ def create_app() -> Flask:
             payee_aliases=db.list_payee_aliases(conn),
             known_categories=list(CATEGORY_KEYWORDS.keys()),
             budgets=budgets,
+            budget_overruns=budget_overruns,
+            unpaid_views=unpaid_views,
+            settled_card_count=settled_card_count,
             filters=filters,
             filter_q=filters.get("q", ""),
             filter_category=filters.get("category", ""),
@@ -763,7 +800,9 @@ def create_app() -> Flask:
             conn, card_id, amount, _parse_date(request.form.get("paid_on")) or date.today()
         )
         flash(f"Recorded {format_inr(amount)} against {card.label}.", "success")
-        return redirect(url_for("index"))
+        return redirect(
+            url_for("index", tab="cards", highlight="pay-checklist")
+        )
 
     @app.post("/cards/<int:card_id>/delete")
     def delete_card(card_id: int):
@@ -1642,7 +1681,8 @@ def create_app() -> Flask:
         conn = db.connect()
         db.init(conn)
         month_start = _parse_month(request.args.get("month"))
-        start, end = _month_window(month_start)
+        scope = _expense_scope()
+        start, end = _expense_list_window(month_start, scope=scope)
         expenses = db.list_expenses(conn, start=start, end=end, **_filter_args())
         fieldnames = [
             "id",
@@ -1665,23 +1705,25 @@ def create_app() -> Flask:
             }
             for expense in expenses
         ]
-        return _csv_response(
-            f"expenses-{month_start.strftime('%Y-%m')}.csv", fieldnames, csv_rows
-        )
+        suffix = "all" if scope == "all" else month_start.strftime("%Y-%m")
+        return _csv_response(f"expenses-{suffix}.csv", fieldnames, csv_rows)
 
     @app.get("/export/expenses.json")
     def export_expenses_json():
         conn = db.connect()
         db.init(conn)
         month_start = _parse_month(request.args.get("month"))
-        start, end = _month_window(month_start)
+        scope = _expense_scope()
+        start, end = _expense_list_window(month_start, scope=scope)
         expenses = db.list_expenses(conn, start=start, end=end, **_filter_args())
         payload = {
             "month": month_start.strftime("%Y-%m"),
+            "scope": scope,
             "expenses": _expense_export_rows(expenses),
         }
+        suffix = "all" if scope == "all" else month_start.strftime("%Y-%m")
         return _json_response(
-            f"expenses-{month_start.strftime('%Y-%m')}.json", payload
+            f"expenses-{suffix}.json", payload
         )
 
     @app.get("/export/statement/<int:statement_id>/transactions.csv")

@@ -839,6 +839,71 @@ def test_export_expenses_csv_and_json(client, conn):
     assert "source_ref" not in payload["expenses"][0]
 
 
+def test_expense_scope_all_finds_other_months_and_export(client, conn):
+    # Use spent_on <= today so scope=all's open-ended window (… tomorrow) includes them.
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 8, 5),
+            amount=100,
+            description="August coffee",
+            source=SOURCE_MANUAL,
+        ),
+    )
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 6, 5),
+            amount=200,
+            description="June coffee",
+            source=SOURCE_MANUAL,
+        ),
+    )
+    db.add_expense(
+        conn,
+        Expense(
+            spent_on=date(2026, 6, 6),
+            amount=50,
+            description="June groceries",
+            source=SOURCE_MANUAL,
+        ),
+    )
+
+    month_page = client.get("/?tab=expenses&month=2026-08&q=coffee").get_data(as_text=True)
+    assert "August coffee" in month_page
+    assert "June coffee" not in month_page
+    assert 'name="scope"' in month_page
+    assert "This month" in month_page
+    assert "All months" in month_page
+
+    all_page = client.get(
+        "/?tab=expenses&month=2026-08&scope=all&q=coffee"
+    ).get_data(as_text=True)
+    assert "August coffee" in all_page
+    assert "June coffee" in all_page
+    assert "June groceries" not in all_page
+    assert "2 matches across all months" in all_page
+    assert "month-chip" in all_page
+    assert "scope-all-banner" in all_page
+    # Month summary stays August even when listing all months.
+    assert "Spent in August 2026" in all_page
+    assert "1 entry this month" in all_page or "1 entr" in all_page
+
+    csv_resp = client.get("/export/expenses.csv?month=2026-08&scope=all&q=coffee")
+    assert csv_resp.status_code == 200
+    assert "expenses-all.csv" in csv_resp.headers.get("Content-Disposition", "")
+    csv_text = csv_resp.get_data(as_text=True)
+    assert "August coffee" in csv_text
+    assert "June coffee" in csv_text
+    assert "June groceries" not in csv_text
+
+    json_resp = client.get("/export/expenses.json?month=2026-08&scope=all&q=coffee")
+    payload = json_resp.get_json()
+    assert payload["scope"] == "all"
+    assert payload["month"] == "2026-08"
+    assert len(payload["expenses"]) == 2
+
+
 def test_filter_query_params_round_trip_on_expenses(client, conn):
     db.add_expense(
         conn,

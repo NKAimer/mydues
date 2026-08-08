@@ -11,6 +11,8 @@
   <title>Categories — Mydues</title>
   {% elif tab == 'planner' %}
   <title>Planner — Mydues</title>
+  {% elif tab == 'report' %}
+  <title>Report — Mydues</title>
   {% else %}
   <title>Credit cards — Mydues</title>
   {% endif %}
@@ -40,7 +42,7 @@
         {% else %}
           <a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a>
         {% endif %}
-      {% elif tab == 'categories' or tab == 'planner' %}
+      {% elif tab == 'categories' or tab == 'planner' or tab == 'report' %}
         {% if gmail_connected %}
           <form method="post" action="{{ url_for('auth_disconnect') }}">
             <button class="btn subtle" type="submit">Disconnect Gmail</button>
@@ -80,6 +82,8 @@
        href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">Expenses</a>
     <a class="tab {% if tab == 'planner' %}active{% endif %}"
        href="{{ url_for('index', tab='planner', month=expense_month_key) }}">Planner</a>
+    <a class="tab {% if tab == 'report' %}active{% endif %}"
+       href="{{ url_for('index', tab='report', month=expense_month_key) }}">Report</a>
     <a class="tab {% if tab == 'categories' %}active{% endif %}"
        href="{{ url_for('index', tab='categories') }}">Categories</a>
   </nav>
@@ -317,7 +321,7 @@
     <div class="stat">
       <span class="stat-label">Spent in {{ expense_month_label }}</span>
       <span class="stat-value">{{ expense_total | inr }}</span>
-      <span class="stat-foot">{{ expenses | length }} entr{{ 'y' if expenses|length == 1 else 'ies' }}{% if filters %} (filtered){% endif %}</span>
+      <span class="stat-foot">{{ month_expense_count }} entr{{ 'y' if month_expense_count == 1 else 'ies' }} this month</span>
       {% if expense_category_totals %}
         <ul class="category-totals">
           {% for label, amount in expense_category_totals %}
@@ -330,8 +334,8 @@
         </ul>
       {% endif %}
       <p class="export-links">
-        <a class="btn subtle" href="{{ url_for('export_expenses_csv', month=expense_month_key, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export CSV</a>
-        <a class="btn subtle" href="{{ url_for('export_expenses_json', month=expense_month_key, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export JSON</a>
+        <a class="btn subtle" href="{{ url_for('export_expenses_csv', month=expense_month_key, scope=expense_scope if expense_scope == 'all' else none, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export CSV</a>
+        <a class="btn subtle" href="{{ url_for('export_expenses_json', month=expense_month_key, scope=expense_scope if expense_scope == 'all' else none, q=filter_q or none, category=filter_category or none, min_amount=filter_min, max_amount=filter_max) }}">Export JSON</a>
       </p>
     </div>
   </section>
@@ -377,17 +381,35 @@
   </section>
 
   <section class="panel expenses-month">
+    {% if expense_scope != 'all' %}
     <div class="month-nav">
       <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_prev_month) }}">← Prev</a>
       <h2>{{ expense_month_label }}</h2>
       <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_next_month) }}">Next →</a>
     </div>
+    {% else %}
+    <div class="month-nav scope-all-banner">
+      <h2>All months</h2>
+      <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">This month</a>
+    </div>
+    {% endif %}
     <p class="sub">Descriptions come from the alert text. If a row looks like boilerplate, use Refresh descriptions from Gmail.</p>
     <p class="fetch-stamp">Expenses last fetched {{ expenses_fetched }}</p>
 
     <form method="get" action="{{ url_for('index') }}" class="filter-row">
       <input type="hidden" name="tab" value="expenses">
       <input type="hidden" name="month" value="{{ expense_month_key }}">
+      <fieldset class="scope-toggle">
+        <legend>Scope</legend>
+        <label class="scope-option">
+          <input type="radio" name="scope" value="month" {% if expense_scope != 'all' %}checked{% endif %}>
+          This month
+        </label>
+        <label class="scope-option">
+          <input type="radio" name="scope" value="all" {% if expense_scope == 'all' %}checked{% endif %}>
+          All months
+        </label>
+      </fieldset>
       <div class="filter-fields">
         <label>Search
           <input type="search" name="q" value="{{ filter_q }}" placeholder="Description or note">
@@ -405,7 +427,7 @@
       <div class="filter-toolbar">
         <span class="filter-actions">
           <button class="btn" type="submit">Filter</button>
-          {% if filters %}
+          {% if filters or expense_scope == 'all' %}
             <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_month_key) }}">Clear</a>
           {% endif %}
         </span>
@@ -417,6 +439,10 @@
         </label>
       </div>
     </form>
+
+    {% if expense_scope == 'all' or filters %}
+      <p class="match-count">{{ expenses | length }} match{{ '' if expenses|length == 1 else 'es' }}{% if expense_scope == 'all' %} across all months{% endif %}{% if filters %} (filtered){% endif %}</p>
+    {% endif %}
 
     {% if expenses %}
       <table class="expense-table stackable-table" data-density-table>
@@ -432,7 +458,12 @@
         <tbody>
           {% for expense in expenses %}
             <tr id="expense-{{ expense.id }}" class="{{ 'row-highlight' if highlight == 'expense-' ~ expense.id }}">
-              <td data-label="Date">{{ (expense.spent_at or expense.spent_on) | dmy_hm }}</td>
+              <td data-label="Date">
+                {{ (expense.spent_at or expense.spent_on) | dmy_hm }}
+                {% if expense_scope == 'all' %}
+                  <span class="month-chip">{{ expense.spent_on.strftime('%b %Y') }}</span>
+                {% endif %}
+              </td>
               <td data-label="Description">
                 {{ expense.description }}
                 {% if expense.source == 'gmail' %}<span class="pill muted">gmail</span>{% endif %}
@@ -493,12 +524,17 @@
       </table>
     {% else %}
       <div class="empty empty-state">
-        <h2>No expenses for this month yet</h2>
-        <p>{% if gmail_connected %}Fetch alerts from Gmail or add one by hand below.{% else %}Connect Gmail or add an expense by hand.{% endif %}</p>
-        {% if gmail_connected %}
-          <p><a class="btn primary" href="#fetch-expenses">Fetch expense alerts</a></p>
+        {% if expense_scope == 'all' or filters %}
+          <h2>No matching expenses</h2>
+          <p>Try a different search or switch back to this month.</p>
         {% else %}
-          <p><a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a></p>
+          <h2>No expenses for this month yet</h2>
+          <p>{% if gmail_connected %}Fetch alerts from Gmail or add one by hand below.{% else %}Connect Gmail or add an expense by hand.{% endif %}</p>
+          {% if gmail_connected %}
+            <p><a class="btn primary" href="#fetch-expenses">Fetch expense alerts</a></p>
+          {% else %}
+            <p><a class="btn primary" href="{{ url_for('auth_start') }}">Connect Gmail</a></p>
+          {% endif %}
         {% endif %}
       </div>
     {% endif %}
@@ -784,6 +820,127 @@
     })();
   </script>
 
+  {% elif tab == 'report' %}
+
+  <section class="month-nav">
+    <a class="btn subtle" href="{{ url_for('index', tab='report', month=expense_prev_month) }}">← Prev</a>
+    <h2 class="month-label">{{ expense_month_label }}</h2>
+    <a class="btn subtle" href="{{ url_for('index', tab='report', month=expense_next_month) }}">Next →</a>
+  </section>
+
+  <p class="planner-lead">Month-close snapshot — read-only. Edit plan, spend, or dues on the other tabs.</p>
+
+  <section class="summary report-snapshot" aria-label="Month snapshot">
+    <div class="stat">
+      <span class="stat-label">Salary</span>
+      <span class="stat-value">{{ planner.salary | inr }}</span>
+      {% if planner.credited_on %}
+        <span class="stat-foot">Credited {{ planner.credited_on | dmy }}</span>
+      {% endif %}
+    </div>
+    <div class="stat">
+      <span class="stat-label">Planned outflows</span>
+      <span class="stat-value">{{ planner.outflows | inr }}</span>
+      <span class="stat-foot">Recurring {{ planner.recurring_total | inr }} · Extras {{ planner.planned_total | inr }}</span>
+    </div>
+    <div class="stat {% if planner.savings < 0 %}stat-warn{% endif %}">
+      <span class="stat-label">Planned savings</span>
+      <span class="stat-value">{{ planner.savings | inr }}</span>
+    </div>
+    <div class="stat {% if planner.actual_vs_planned > 0 %}stat-warn{% endif %}">
+      <span class="stat-label">Actual spend</span>
+      <span class="stat-value">{{ planner.actual_spend | inr }}</span>
+      <span class="stat-foot">
+        {% if planner.actual_vs_planned > 0 %}
+          {{ planner.actual_vs_planned | inr }} over plan
+        {% elif planner.actual_vs_planned < 0 %}
+          {{ (-planner.actual_vs_planned) | inr }} under plan
+        {% else %}
+          On plan
+        {% endif %}
+      </span>
+    </div>
+  </section>
+
+  <section class="panel" id="report-cards">
+    <div class="panel-head">
+      <h2>Cards to pay</h2>
+      <a class="btn subtle" href="{{ url_for('index', tab='cards', highlight='pay-checklist') }}">Open checklist</a>
+    </div>
+    {% if unpaid_views %}
+      <ul class="report-list">
+        {% for view in unpaid_views %}
+          <li>
+            <div>
+              <strong>{{ view.card.label }}</strong>
+              <span class="sub">
+                {% if view.due_date %}Due {{ view.due_date | dmy }}{% else %}No due date{% endif %}
+                · <span class="pill {{ view.status }}">{{ status_labels[view.status] }}</span>
+              </span>
+            </div>
+            <span class="report-amount">{{ view.outstanding | inr }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="sub">{{ unpaid_views | length }} unpaid · {{ book.total_outstanding | inr }} outstanding
+        {% if settled_card_count %} · {{ settled_card_count }} settled{% endif %}
+      </p>
+    {% else %}
+      <p class="empty">No unpaid cards{% if settled_card_count %} · {{ settled_card_count }} settled{% endif %}.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel" id="report-budgets">
+    <div class="panel-head">
+      <h2>Budget overruns</h2>
+      <a class="btn subtle" href="{{ url_for('index', tab='expenses', month=expense_month_key) }}#budgets">Budgets</a>
+    </div>
+    {% if budget_overruns %}
+      <ul class="report-list">
+        {% for row in budget_overruns %}
+          <li class="over">
+            <div>
+              <span class="cat-dot {{ category_colors.get(row.category, 'cat-uncategorized') }}" aria-hidden="true"></span>
+              <strong>{{ row.category }}</strong>
+              <span class="pill warn">Over</span>
+            </div>
+            <span class="report-amount">{{ row.spent | inr }} / {{ row.amount_limit | inr }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">{% if budgets %}No overruns this month.{% else %}No budgets set for this month.{% endif %}</p>
+    {% endif %}
+  </section>
+
+  <section class="panel" id="report-goals">
+    <div class="panel-head">
+      <h2>Goals pace</h2>
+      <a class="btn subtle" href="{{ url_for('index', tab='planner', month=expense_month_key) }}#planner-goals">Planner</a>
+    </div>
+    {% if planner.goals %}
+      <ul class="planner-list goals-list">
+        {% for goal in planner.goals %}
+          <li>
+            <div>
+              <strong>{{ goal.label }}</strong>
+              <span class="sub">Target {{ goal.target_amount | inr }}
+                {% if goal.months_at_pace %}
+                  · ~{{ goal.months_at_pace }} month{{ '' if goal.months_at_pace == 1 else 's' }} at this pace
+                {% elif planner.savings <= 0 %}
+                  · need positive savings
+                {% endif %}
+              </span>
+              <div class="meter" aria-hidden="true"><div class="meter-fill" style="width: {{ goal.pct }}%"></div></div>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No savings goals yet. Add one in Planner.</p>
+    {% endif %}
+  </section>
+
   {% else %}
 
   {% if gmail_connected %}
@@ -830,6 +987,38 @@
       {% endif %}
     </section>
   {% endif %}
+
+  <section class="panel pay-checklist{% if highlight == 'pay-checklist' %} row-highlight{% endif %}"
+           id="pay-checklist" aria-label="Pay checklist">
+    <div class="panel-head">
+      <h2>Pay checklist</h2>
+      {% if settled_card_count %}
+        <span class="sub">{{ settled_card_count }} settled</span>
+      {% endif %}
+    </div>
+    {% if unpaid_views %}
+      <ul class="pay-checklist-list">
+        {% for view in unpaid_views %}
+          <li>
+            <div class="pay-checklist-main">
+              <a href="#card-{{ view.card.id }}"><strong>{{ view.card.label }}</strong></a>
+              <span class="pay-checklist-meta">
+                {{ view.outstanding | inr }}
+                {% if view.due_date %}· Due {{ view.due_date | dmy }}{% endif %}
+                · <span class="pill {{ view.status }}">{{ status_labels[view.status] }}</span>
+              </span>
+            </div>
+            <form method="post" action="{{ url_for('record_payment', card_id=view.card.id) }}" class="pay-checklist-pay">
+              <input type="hidden" name="amount" value="">
+              <button class="btn primary" type="submit">Mark paid</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">{% if book.views %}All cards settled.{% else %}No cards yet.{% endif %}</p>
+    {% endif %}
+  </section>
 
   {% if due_urgency.overdue or due_urgency.due_3 or due_urgency.due_week %}
   <section class="due-urgency" aria-label="Due urgency">

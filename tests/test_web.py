@@ -128,11 +128,27 @@ def test_a_date_of_birth_is_taken_as_ddmmyyyy(client, conn):
 
 def test_recording_a_payment_settles_the_card(client, conn):
     card = seed(conn)
-    client.post(f"/cards/{card.id}/paid", data={"amount": ""}, follow_redirects=True)
+    page = client.get("/?tab=cards").get_data(as_text=True)
+    assert 'id="pay-checklist"' in page
+    assert "Mark paid" in page
+    assert "HDFC Infinia" in page
+    assert "pay-checklist-list" in page
+
+    response = client.post(
+        f"/cards/{card.id}/paid", data={"amount": ""}, follow_redirects=False
+    )
+    assert response.status_code == 302
+    assert "tab=cards" in response.headers["Location"]
+    assert "highlight=pay-checklist" in response.headers["Location"]
 
     view = dues.view_for_card(conn, db.get_card(conn, card.id))
     assert view.outstanding == pytest.approx(0.0)
     assert view.status == dues.STATUS_SETTLED
+
+    settled_page = client.get("/?tab=cards&highlight=pay-checklist").get_data(as_text=True)
+    assert "All cards settled" in settled_page
+    assert "1 settled" in settled_page
+    assert "Mark paid" not in settled_page
 
 
 def test_json_endpoint_exposes_source_and_freshness(client, conn):
