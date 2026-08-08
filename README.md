@@ -157,11 +157,13 @@ mydues serve --port 8766      # different port → update OAuth redirect URI
 mydues serve --debug          # auto-reload while developing (local only)
 ```
 
-Three tabs:
+Tabs: Credit cards, Expenses, Planner, Report, Categories.
 
 ### Credit cards
 
 - Portfolio summary: total outstanding, minimum to pay, next due, utilisation
+- **Pay checklist** — unpaid cards with one-click **Mark paid** (records a
+  payment for the full outstanding amount via the existing payments flow)
 - **Billed in Month** — sum of each statement's `total_due` whose
   **`statement_date`** falls in the **10th–9th window** for that month label
   (e.g. July includes statements generated 10 Jul through 9 Aug inclusive; not
@@ -190,8 +192,29 @@ Separate from statement PDFs so dues Fetch never double-counts alert mail.
   body with bank-agnostic patterns rather than per-bank subject rules alone
 - **Fetch expense alerts** (default lookback **7 days**, editable on the button
   row) and **Refresh descriptions from Gmail**
-- Add / edit / delete expenses by hand; **Show email** for Gmail-sourced rows
-- Totals and category breakdown for the selected calendar month (`spent_on`)
+- Add / edit / delete expenses by hand; optional spend **time** (`spent_at`) on
+  alerts and forms; **Show email** for Gmail-sourced rows
+- Scope **This month** | **All months** (`scope=all`) for search and filters
+  across the ledger; CSV / JSON exports use the same scope and filters
+- Totals and category breakdown for the selected calendar month (`spent_on`) —
+  the month summary stays month-scoped even when the list is All months
+
+### Planner
+
+Monthly cashflow for the plan month (salary credited at the end of the prior
+month funds it).
+
+- Salary, recurring outflows, one-off planned extras, and savings goals
+- Actual Gmail / manual spend vs planned; mark recurrings paid for the month
+- Side-rail scratch calculator with history
+
+### Report
+
+Read-only month-close snapshot (`tab=report`). Edit plan, spend, or dues on the
+other tabs.
+
+- Planner summary (salary, planned outflows, savings, actual vs plan)
+- Unpaid cards (link to the Cards pay checklist), budget overruns, goals pace
 
 ### Categories
 
