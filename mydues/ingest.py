@@ -91,6 +91,16 @@ def _resolve_card(
         if found:
             return found
 
+    # ICICI Sapphiro and similar layouts print an EMI/PLCC mask before the card.
+    if statement.issuer and statement.all_last4s:
+        matched: list[Card] = []
+        for last4 in statement.all_last4s:
+            found = db.find_card(conn, issuer=statement.issuer, last4=last4)
+            if found and found not in matched:
+                matched.append(found)
+        if len(matched) == 1:
+            return matched[0]
+
     # SBI often prints XX18 instead of 3418; match a unique same-issuer ending.
     tail = statement.card_tail or statement.last4
     if tail and statement.issuer:

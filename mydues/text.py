@@ -286,23 +286,38 @@ _ALTERNATE_ACCOUNT_RE = re.compile(
 CARD_NUMBER_RE = _CARD_GROUPED_RE
 
 
-def find_card_last4(text: str) -> str | None:
-    """Last four digits of a masked credit-card number in `text`."""
+def _last4_from_labeled_token(token: str) -> str | None:
+    if not re.search(r"[Xx*]", token):
+        return None
+    digits = re.sub(r"\D", "", token)
+    if len(digits) >= 4:
+        return digits[-4:]
+    return None
+
+
+def find_all_card_last4s(text: str) -> list[str]:
+    """Every distinct last4 from masked card numbers in `text`, best-first."""
     cleaned = _ALTERNATE_ACCOUNT_RE.sub(" ", text or "")
+    seen: list[str] = []
+
+    def add(last4: str | None) -> None:
+        if last4 and last4 not in seen:
+            seen.append(last4)
 
     for match in _CARD_LABELED_RE.finditer(cleaned):
-        token = match.group(1)
-        if not re.search(r"[Xx*]", token):
-            continue
-        digits = re.sub(r"\D", "", token)
-        if len(digits) >= 4:
-            return digits[-4:]
+        add(_last4_from_labeled_token(match.group(1)))
 
     for pattern in (_CARD_COMPACT_RE, _CARD_GROUPED_RE):
-        match = pattern.search(cleaned)
-        if match:
-            return match.group(1)
-    return None
+        for match in pattern.finditer(cleaned):
+            add(match.group(1))
+
+    return seen
+
+
+def find_card_last4(text: str) -> str | None:
+    """Last four digits of a masked credit-card number in `text`."""
+    all_last4s = find_all_card_last4s(text)
+    return all_last4s[0] if all_last4s else None
 
 
 def find_card_tail(text: str) -> str | None:
