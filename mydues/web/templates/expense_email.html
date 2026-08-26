@@ -6,12 +6,15 @@
   <meta name="application-name" content="Mydues">
   <title>Expense email — Mydues</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body>
 <div class="shell">
   <header class="masthead">
-    <div>
+    <div class="brand">
       <h1>Expense email</h1>
       <p class="sub">Original Gmail alert for this spend</p>
     </div>
@@ -42,7 +45,7 @@
     {% endif %}
     <p class="email-meta sub">
       Linked expense: {{ expense.description }} · {{ expense.amount | inr }}
-      · {{ expense.spent_on | dmy }}
+      · {{ (expense.spent_at or expense.spent_on) | dmy_hm }}
     </p>
     <pre class="email-body">{{ body }}</pre>
   </section>

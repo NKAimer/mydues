@@ -76,6 +76,9 @@ class ParsedStatement:
     credit_limit: float | None = None
     available_credit: float | None = None
     last4: str | None = None
+    # Every masked last4 seen in the PDF, best-first; used when the first guess
+    # is an EMI/PLCC line rather than the statement card.
+    all_last4s: list[str] = field(default_factory=list)
     # Trailing digits visible on partial masks (e.g. XX18); used to match a card
     # when the full last4 is not printed.
     card_tail: str | None = None
@@ -126,4 +129,5 @@ class Expense:
     charge_kind: str | None = None
     source_ref: str | None = None
     note: str | None = None
+    spent_at: datetime | None = None
     created_at: datetime | None = None

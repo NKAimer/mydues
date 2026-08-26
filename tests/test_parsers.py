@@ -340,3 +340,16 @@ def test_a_statement_period_uses_the_closing_date():
     assert result is not None
     assert result.statement_date == date(2026, 7, 28)
     assert result.due_date == date(2026, 8, 15)
+
+
+def test_icici_sapphiro_collects_every_masked_last4():
+    from mydues.text import find_all_card_last4s, find_card_last4
+
+    raw = fixtures.ICICI_SAPPHIRO_MULTI_MASK
+    assert find_card_last4(raw) == "3006"
+    assert find_all_card_last4s(raw) == ["3006", "4007"]
+
+    result = parse(raw, issuer_hint="icici")
+    assert result is not None
+    assert result.last4 == "3006"
+    assert result.all_last4s == ["3006", "4007"]

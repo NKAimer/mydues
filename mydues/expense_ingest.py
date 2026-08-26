@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
 from html import unescape
 
 from . import db, gmail, issuers
@@ -33,7 +33,7 @@ DEFAULT_PAYEE_CUES = (
 _CUE_STOP_AHEAD = (
     r"(?=\s+Axis\s+Bank|\s+Credit\s+Card|\s+Date\b|\s+Available|"
     r"\s+Card\s+No|\s+Transaction\b|\s+on\s+\d|\s+at\s+\d|"
-    r"\s+via\s+|\s+using\s+|\s+ref(?:erence)?\b|[.,]|$)"
+    r"\s+via\s+|\s+using\s+|\s+through\s+|\s+ref(?:erence)?\b|[.,]|$)"
 )
 
 
@@ -68,6 +68,10 @@ ALERT_SUBJECT_HINTS = (
     "paid via upi",
     "sent using upi",
     "sent via upi",
+    # Kotak811 / bank app UPI confirmations.
+    "payment of inr",
+    "payment of rs",
+    "payment successful",
 )
 
 # Full statement subjects — never treat these as expenses.
@@ -111,6 +115,26 @@ _LOAN_OFFER_RE = re.compile(
     r"|cash\s+loan"
     r")\b"
 )
+
+# Kotak811 / bank footers mention "Personal Loan will not be disbursed…" — not offers.
+_LOAN_DISCLAIMER_RE = re.compile(
+    r"(?i)will\s+not\s+be\s+disbursed|subject\s+to\s+(?:guidelines|market\s+risks)|"
+    r"credit\s+at\s+the\s+sole\s+discretion|read\s+all\s+scheme"
+)
+
+def _is_loan_offer_blob(blob: str) -> bool:
+    """True for loan/EMI promo mail, not regulatory footers that mention loans."""
+    for match in _LOAN_OFFER_RE.finditer(blob or ""):
+        # Footers often trail the real alert; ignore matches in the last third
+        # when the message is long enough to have a marketing disclaimer.
+        if len(blob) > 600 and match.start() > len(blob) * 2 // 3:
+            continue
+        window = blob[match.start() : match.start() + 120]
+        if _LOAN_DISCLAIMER_RE.search(window):
+            continue
+        return True
+    return False
+
 
 _TRANSFER_TYPE_RE = re.compile(r"(?i)\b(?:imps|neft)\b")
 
@@ -182,7 +206,8 @@ _MERCHANT_PATTERNS = (
     ),
     re.compile(
         r"(?i)(?:spent\s+at|paid\s+to|towards|info\s*:|merchant\s*:)\s+"
-        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80})"
+        r"([A-Za-z0-9][A-Za-z0-9 &.'@/_-]{1,80}?)"
+        r"(?=\s+on\s+\d|\s+via\s+|\s+using\s+|\s+through\s+|\s+ref(?:erence)?\b|[.,]|$)"
     ),
     re.compile(
         r"(?i)\bUPI[_/]+([A-Za-z][A-Za-z0-9 &.'@/_-]{1,60})"
@@ -212,6 +237,10 @@ _DISCLAIMER_LINE = re.compile(
 )
 _DATE_INLINE = re.compile(
     r"\b(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4})\b"
+)
+# Prefer "at 20:36:36"; also accept bare HH:MM(:SS) with valid clock values.
+_TIME_INLINE = re.compile(
+    r"(?i)(?:\bat\s+)?(\d{1,2}):(\d{2})(?::(\d{2}))?\b"
 )
 _BAD_MERCHANT = re.compile(
     r"(?i)\b(?:"
@@ -509,6 +538,43 @@ def _short_note(*, subject: str, body_plain: str, description: str) -> str | Non
     return note
 
 
+def _parse_alert_time(blob: str) -> time | None:
+    """First valid clock time in the alert; prefer matches preceded by 'at '."""
+    preferred: time | None = None
+    fallback: time | None = None
+    for match in _TIME_INLINE.finditer(blob):
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        second = int(match.group(3) or 0)
+        if not (0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+            continue
+        parsed = time(hour, minute, second)
+        # Match may include the leading "at " (see _TIME_INLINE), so check the
+        # matched token — looking only at chars before match.start() never sees it.
+        if match.group(0).lower().startswith("at"):
+            preferred = parsed
+            break
+        if fallback is None:
+            fallback = parsed
+    return preferred or fallback
+
+
+def _resolve_spent_at(
+    *,
+    spent_on: date,
+    blob: str,
+    received_at: datetime | None,
+) -> datetime | None:
+    """Body time on spent_on, else Gmail receive clock on spent_on, else None."""
+    clock = _parse_alert_time(blob)
+    if clock is not None:
+        return datetime.combine(spent_on, clock)
+    if received_at is not None:
+        # Keep spent_at.date() aligned with spent_on (receive can be next day).
+        return datetime.combine(spent_on, received_at.time())
+    return None
+
+
 def parse_alert_email(
     *,
     subject: str,
@@ -531,7 +597,7 @@ def parse_alert_email(
 
     body_plain = _strip_html(body)
     blob = f"{subject}\n{body_plain}"
-    if _LOAN_OFFER_RE.search(blob):
+    if _is_loan_offer_blob(blob):
         return None
     if _TRANSFER_TYPE_RE.search(blob):
         return None
@@ -558,6 +624,10 @@ def parse_alert_email(
     if spent_on is None:
         spent_on = date.today()
 
+    spent_at = _resolve_spent_at(
+        spent_on=spent_on, blob=blob, received_at=received_at
+    )
+
     cues = db.list_payee_cue_strings(conn) if conn is not None else None
     merchant = _extract_merchant(blob, cues=cues)
     description = merchant or _clean_subject(subject) or "Gmail alert"
@@ -574,6 +644,7 @@ def parse_alert_email(
         category=category,
         category_source=source,
         note=note,
+        spent_at=spent_at,
     )
 
 
@@ -625,23 +696,28 @@ def refresh_expense_from_gmail(
             description, note=note, conn=conn
         )
 
+    spent_on = parsed.spent_on
+    spent_at = parsed.spent_at
     if (
         description == expense.description
         and note == expense.note
         and category == expense.category
         and category_source == expense.category_source
+        and spent_on == expense.spent_on
+        and spent_at == expense.spent_at
     ):
         return False
 
     return db.update_expense(
         conn,
         expense.id,
-        spent_on=expense.spent_on,
+        spent_on=spent_on,
         amount=expense.amount,
         description=description,
         category=category,
         category_source=category_source,
         note=note,
+        spent_at=spent_at,
     )
 
 

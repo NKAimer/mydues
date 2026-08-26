@@ -7,12 +7,12 @@ import io
 import json
 import logging
 import re
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from urllib.parse import urlencode
 
 from flask import Flask, Response, flash, redirect, render_template, request, session, stream_with_context, url_for
 
-from .. import config, db, dues, expense_ingest, gmail, ingest, issuers
+from .. import config, db, dues, expense_ingest, gmail, ingest, issuers, planner
 from ..audit import audit_cards
 from ..categories import (
     CATEGORY_KEYWORDS,
@@ -71,6 +71,35 @@ def _parse_date(value: str | None) -> date | None:
 def format_dmy(value: date | datetime | None) -> str:
     """Dates are written and read the Indian way: 05/08/2026."""
     return value.strftime("%d/%m/%Y") if value is not None else ""
+
+
+def format_dmy_hm(value: date | datetime | None) -> str:
+    """Date with time when a datetime is given: 05/08/2026 20:36."""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%d/%m/%Y %H:%M")
+    return value.strftime("%d/%m/%Y")
+
+
+def _parse_time_hm(value: str | None) -> time | None:
+    """Parse HH:MM or HH:MM:SS; blank → None."""
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            return datetime.strptime(raw, fmt).time()
+        except ValueError:
+            continue
+    return None
+
+
+def _combine_spent_at(spent_on: date, time_value: str | None) -> datetime | None:
+    clock = _parse_time_hm(time_value)
+    if clock is None:
+        return None
+    return datetime.combine(spent_on, clock)
 
 
 def _flash_reapply_stats(stats: dict[str, int]) -> None:
@@ -261,6 +290,20 @@ def _filter_args(args=None) -> dict:
     return out
 
 
+def _expense_scope(args=None) -> str:
+    """Expense list window: ``month`` (default) or ``all``."""
+    src = args if args is not None else request.args
+    scope = (src.get("scope") or "month").strip().lower()
+    return "all" if scope == "all" else "month"
+
+
+def _expense_list_window(month_start: date, *, scope: str) -> tuple[date, date]:
+    """Half-open [start, end) for the expense table (not month summary totals)."""
+    if scope == "all":
+        return date(1970, 1, 1), date.today() + timedelta(days=1)
+    return _month_window(month_start)
+
+
 def _filter_query(**extra) -> str:
     """Query string preserving month/tab/filters plus extras (e.g. highlight)."""
     params: dict = {}
@@ -276,6 +319,9 @@ def _filter_query(**extra) -> str:
     txns = (request.args.get("txns") or request.form.get("txns") or "").strip()
     if txns:
         params["txns"] = txns
+    scope = _expense_scope()
+    if scope == "all":
+        params["scope"] = "all"
     for key, value in _filter_args().items():
         if key == "charges_only":
             params["charges"] = "1"
@@ -372,11 +418,17 @@ def _format_fetch_stamp(value: str | None) -> str:
 def _expense_export_rows(expenses: list[Expense]) -> list[dict]:
     rows = []
     for expense in expenses:
+        when = expense.spent_at or expense.spent_on
         rows.append(
             {
                 "id": expense.id,
                 "spent_on": expense.spent_on.isoformat() if expense.spent_on else None,
-                "spent_on_dmy": format_dmy(expense.spent_on),
+                "spent_on_dmy": format_dmy_hm(when),
+                "spent_at": (
+                    expense.spent_at.isoformat(timespec="seconds")
+                    if expense.spent_at
+                    else None
+                ),
                 "amount": expense.amount,
                 "description": expense.description,
                 "category": expense.category,
@@ -433,6 +485,7 @@ def create_app() -> Flask:
 
     app.jinja_env.filters["inr"] = format_inr
     app.jinja_env.filters["dmy"] = format_dmy
+    app.jinja_env.filters["dmy_hm"] = format_dmy_hm
 
     def _callback_uri() -> str:
         """Where Google should send the browser back.
@@ -483,7 +536,7 @@ def create_app() -> Flask:
         conn = db.connect()
         db.init(conn)
         tab = (request.args.get("tab") or "cards").strip().lower()
-        if tab not in {"cards", "expenses", "categories"}:
+        if tab not in {"cards", "expenses", "categories", "planner", "report"}:
             tab = "cards"
 
         # ?statement=<id> looks back at one earlier cycle; the rest stay latest.
@@ -494,10 +547,12 @@ def create_app() -> Flask:
         month_end_exclusive = _month_window(month_start)[1]
         card_start, card_end = _card_billing_window(month_start)
         filters = _filter_args()
+        expense_scope = _expense_scope()
+        list_start, list_end = _expense_list_window(month_start, scope=expense_scope)
         expenses = db.list_expenses(
-            conn, start=month_start, end=month_end_exclusive, **filters
+            conn, start=list_start, end=list_end, **filters
         )
-        # Totals ignore list filters so the month summary stays stable.
+        # Totals ignore list filters / all-months scope so the month summary stays stable.
         all_month_expenses = db.list_expenses(
             conn, start=month_start, end=month_end_exclusive
         )
@@ -513,17 +568,30 @@ def create_app() -> Flask:
         budgets = db.budget_status_for_month(
             conn, start=month_start, end=month_end_exclusive
         )
+        budget_overruns = [row for row in budgets if row.get("over")]
 
         for view in book.views:
             view.charges_cycle_total = view.charges_this_cycle
 
-        # Apply the same filters to each card's open statement table.
-        if filters:
+        # Apply filters to statement tables only for month-scoped expense filters.
+        if filters and expense_scope == "month":
             for view in book.views:
                 if view.record and view.record.id:
                     view.transactions = db.transactions_for_statement(
                         conn, view.record.id, **filters
                     )
+
+        unpaid_views = sorted(
+            [v for v in book.views if (v.outstanding or 0) > 0],
+            key=lambda v: (
+                v.due_date is None,
+                v.due_date or date.max,
+                (v.card.label or "").lower(),
+            ),
+        )
+        settled_card_count = sum(
+            1 for v in book.views if v.status == dues.STATUS_SETTLED
+        )
 
         highlight = (request.args.get("highlight") or "").strip()
         txns_flag = (request.args.get("txns") or "").strip().lower()
@@ -534,10 +602,17 @@ def create_app() -> Flask:
         # Attach last annual fee / last any charge for card tiles.
         dues.attach_last_charges(conn, book.views)
 
+        plan_month = month_start.strftime("%Y-%m")
+        planner_view = planner.build_planner(conn, plan_month)
+
         return render_template(
             "index.html",
             book=book,
             tab=tab,
+            planner=planner_view,
+            planner_prev_month=planner.shift_month_key(plan_month, -1),
+            planner_next_month=planner.shift_month_key(plan_month, 1),
+            planner_default_credit=planner.prior_month_end(plan_month),
             status_labels=STATUS_LABELS,
             issuers=sorted(issuers.ISSUERS.values(), key=lambda i: i.name),
             today=date.today(),
@@ -549,6 +624,7 @@ def create_app() -> Flask:
             callback_uri=_callback_uri(),
             expenses=expenses,
             expense_total=expense_total,
+            month_expense_count=len(all_month_expenses),
             expense_category_totals=category_spend_totals(all_month_expenses),
             expense_month=month_start,
             expense_month_key=month_start.strftime("%Y-%m"),
@@ -556,6 +632,7 @@ def create_app() -> Flask:
             expense_prev_month=_shift_month(month_start, -1).strftime("%Y-%m"),
             expense_next_month=_shift_month(month_start, 1).strftime("%Y-%m"),
             expense_months=db.expense_months(conn),
+            expense_scope=expense_scope,
             card_spend_total=card_spend_total,
             card_spend_by_card=card_spend_by_card,
             card_category_totals=category_spend_totals(
@@ -567,6 +644,9 @@ def create_app() -> Flask:
             payee_aliases=db.list_payee_aliases(conn),
             known_categories=list(CATEGORY_KEYWORDS.keys()),
             budgets=budgets,
+            budget_overruns=budget_overruns,
+            unpaid_views=unpaid_views,
+            settled_card_count=settled_card_count,
             filters=filters,
             filter_q=filters.get("q", ""),
             filter_category=filters.get("category", ""),
@@ -720,7 +800,9 @@ def create_app() -> Flask:
             conn, card_id, amount, _parse_date(request.form.get("paid_on")) or date.today()
         )
         flash(f"Recorded {format_inr(amount)} against {card.label}.", "success")
-        return redirect(url_for("index"))
+        return redirect(
+            url_for("index", tab="cards", highlight="pay-checklist")
+        )
 
     @app.post("/cards/<int:card_id>/delete")
     def delete_card(card_id: int):
@@ -1161,6 +1243,7 @@ def create_app() -> Flask:
         form = request.form
         amount = _parse_amount(form.get("amount"))
         spent_on = _parse_date(form.get("spent_on")) or date.today()
+        spent_at = _combine_spent_at(spent_on, form.get("spent_at"))
         description = (form.get("description") or "").strip()
         category = (form.get("category") or "").strip() or None
         note = (form.get("note") or "").strip() or None
@@ -1168,6 +1251,9 @@ def create_app() -> Flask:
 
         if amount is None or amount <= 0 or not description:
             flash("Enter an amount and a short description.", "error")
+            return redirect(url_for("index", tab="expenses", month=month_key))
+        if (form.get("spent_at") or "").strip() and spent_at is None:
+            flash("Time must be HH:MM (optional seconds).", "error")
             return redirect(url_for("index", tab="expenses", month=month_key))
 
         db.add_expense(
@@ -1179,6 +1265,7 @@ def create_app() -> Flask:
                 category=category,
                 category_source=CATEGORY_USER if category else None,
                 note=note,
+                spent_at=spent_at,
                 source=SOURCE_MANUAL,
             ),
         )
@@ -1193,6 +1280,7 @@ def create_app() -> Flask:
         form = request.form
         amount = _parse_amount(form.get("amount"))
         spent_on = _parse_date(form.get("spent_on")) or (existing.spent_on if existing else date.today())
+        spent_at = _combine_spent_at(spent_on, form.get("spent_at"))
         description = (form.get("description") or "").strip()
         category = (form.get("category") or "").strip() or None
         note = (form.get("note") or "").strip() or None
@@ -1206,6 +1294,11 @@ def create_app() -> Flask:
             return redirect(
                 url_for("index", tab="expenses", month=existing.spent_on.strftime("%Y-%m"))
             )
+        if (form.get("spent_at") or "").strip() and spent_at is None:
+            flash("Time must be HH:MM (optional seconds).", "error")
+            return redirect(
+                url_for("index", tab="expenses", month=existing.spent_on.strftime("%Y-%m"))
+            )
 
         db.update_expense(
             conn,
@@ -1216,6 +1309,7 @@ def create_app() -> Flask:
             category=category,
             category_source=CATEGORY_USER if category else None,
             note=note,
+            spent_at=spent_at,
         )
         if existing.description and description != existing.description:
             remember_payee_alias(conn, existing.description, description)
@@ -1401,12 +1495,194 @@ def create_app() -> Flask:
             flash(f"Removed budget for {category}.", "success")
         return redirect(url_for("index", tab="expenses", month=month_key))
 
+    def _planner_month() -> str:
+        return (request.form.get("month") or date.today().strftime("%Y-%m")).strip()
+
+    def _planner_redirect(month_key: str | None = None):
+        return redirect(
+            url_for("index", tab="planner", month=month_key or _planner_month())
+        )
+
+    @app.post("/planner/income")
+    def planner_save_income():
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        amount = _parse_amount(request.form.get("amount"))
+        if amount is None or amount < 0:
+            flash("Enter a valid salary amount.", "error")
+            return _planner_redirect(month_key)
+        credited_raw = (request.form.get("credited_on") or "").strip()
+        credited_on = None
+        if credited_raw:
+            try:
+                credited_on = date.fromisoformat(credited_raw)
+            except ValueError:
+                flash("Credited-on date must be YYYY-MM-DD.", "error")
+                return _planner_redirect(month_key)
+        else:
+            credited_on = planner.prior_month_end(month_key)
+        note = (request.form.get("note") or "").strip() or None
+        db.upsert_monthly_income(
+            conn,
+            month=month_key,
+            amount=amount,
+            credited_on=credited_on,
+            note=note,
+        )
+        flash(f"Salary for {month_key}: {format_inr(amount)}.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/income/copy")
+    def planner_copy_income():
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        from_month = planner.shift_month_key(month_key, -1)
+        if not db.copy_monthly_income(conn, from_month=from_month, to_month=month_key):
+            flash(f"No salary saved for {from_month} to copy.", "error")
+        else:
+            flash(f"Copied salary from {from_month}.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/recurring")
+    def planner_add_recurring():
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        label = (request.form.get("label") or "").strip()
+        amount = _parse_amount(request.form.get("amount"))
+        day_raw = (request.form.get("day_of_month") or "").strip()
+        day = int(day_raw) if day_raw.isdigit() else None
+        if not label or amount is None or amount < 0:
+            flash("Enter a label and amount for the recurring expense.", "error")
+            return _planner_redirect(month_key)
+        if db.add_recurring_expense(
+            conn, label=label, amount=amount, day_of_month=day
+        ) is None:
+            flash("Could not add that recurring expense.", "error")
+        else:
+            flash(f"Added recurring “{label}”.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/recurring/defaults")
+    def planner_seed_defaults():
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        added = planner.seed_default_recurrings(conn)
+        if added:
+            flash(f"Added {added} default recurring item(s). Set the amounts.", "success")
+        else:
+            flash("Default recurrings already present.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/recurring/<int:recurring_id>/edit")
+    def planner_edit_recurring(recurring_id: int):
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        label = (request.form.get("label") or "").strip()
+        amount = _parse_amount(request.form.get("amount"))
+        day_raw = (request.form.get("day_of_month") or "").strip()
+        day = int(day_raw) if day_raw.isdigit() else None
+        active = request.form.get("active") == "1"
+        if amount is None or amount < 0:
+            flash("Enter a valid amount for the recurring expense.", "error")
+            return _planner_redirect(month_key)
+        if not db.update_recurring_expense(
+            conn,
+            recurring_id,
+            label=label or None,
+            amount=amount,
+            day_of_month=day,
+            active=active,
+        ):
+            flash("Could not update that recurring.", "error")
+        else:
+            flash("Updated recurring expense.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/recurring/<int:recurring_id>/delete")
+    def planner_delete_recurring(recurring_id: int):
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        if not db.delete_recurring_expense(conn, recurring_id):
+            flash("That recurring is gone.", "error")
+        else:
+            flash("Removed recurring expense.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/recurring/<int:recurring_id>/paid")
+    def planner_toggle_paid(recurring_id: int):
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        paid = request.form.get("paid") == "1"
+        if not db.set_recurring_paid(conn, recurring_id, month_key, paid=paid):
+            flash("Could not update paid status.", "error")
+        else:
+            flash("Marked paid." if paid else "Cleared paid mark.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/planned")
+    def planner_add_planned():
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        label = (request.form.get("label") or "").strip()
+        amount = _parse_amount(request.form.get("amount"))
+        if db.add_planned_expense(
+            conn, month=month_key, label=label, amount=amount if amount is not None else -1
+        ) is None:
+            flash("Enter a label and amount for the one-off plan.", "error")
+        else:
+            flash(f"Added planned “{label}”.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/planned/<int:planned_id>/delete")
+    def planner_delete_planned(planned_id: int):
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        if not db.delete_planned_expense(conn, planned_id):
+            flash("That planned item is gone.", "error")
+        else:
+            flash("Removed planned expense.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/goals")
+    def planner_add_goal():
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        label = (request.form.get("label") or "").strip()
+        target = _parse_amount(request.form.get("target_amount"))
+        if db.add_savings_goal(conn, label=label, target_amount=target or 0) is None:
+            flash("Enter a goal label and a positive target.", "error")
+        else:
+            flash(f"Added savings goal “{label}”.", "success")
+        return _planner_redirect(month_key)
+
+    @app.post("/planner/goals/<int:goal_id>/delete")
+    def planner_delete_goal(goal_id: int):
+        conn = db.connect()
+        db.init(conn)
+        month_key = _planner_month()
+        if not db.delete_savings_goal(conn, goal_id):
+            flash("That goal is gone.", "error")
+        else:
+            flash("Removed savings goal.", "success")
+        return _planner_redirect(month_key)
+
     @app.get("/export/expenses.csv")
     def export_expenses_csv():
         conn = db.connect()
         db.init(conn)
         month_start = _parse_month(request.args.get("month"))
-        start, end = _month_window(month_start)
+        scope = _expense_scope()
+        start, end = _expense_list_window(month_start, scope=scope)
         expenses = db.list_expenses(conn, start=start, end=end, **_filter_args())
         fieldnames = [
             "id",
@@ -1420,7 +1696,7 @@ def create_app() -> Flask:
         csv_rows = [
             {
                 "id": expense.id,
-                "spent_on": format_dmy(expense.spent_on),
+                "spent_on": format_dmy_hm(expense.spent_at or expense.spent_on),
                 "amount": expense.amount,
                 "description": expense.description,
                 "category": expense.category or "",
@@ -1429,23 +1705,25 @@ def create_app() -> Flask:
             }
             for expense in expenses
         ]
-        return _csv_response(
-            f"expenses-{month_start.strftime('%Y-%m')}.csv", fieldnames, csv_rows
-        )
+        suffix = "all" if scope == "all" else month_start.strftime("%Y-%m")
+        return _csv_response(f"expenses-{suffix}.csv", fieldnames, csv_rows)
 
     @app.get("/export/expenses.json")
     def export_expenses_json():
         conn = db.connect()
         db.init(conn)
         month_start = _parse_month(request.args.get("month"))
-        start, end = _month_window(month_start)
+        scope = _expense_scope()
+        start, end = _expense_list_window(month_start, scope=scope)
         expenses = db.list_expenses(conn, start=start, end=end, **_filter_args())
         payload = {
             "month": month_start.strftime("%Y-%m"),
+            "scope": scope,
             "expenses": _expense_export_rows(expenses),
         }
+        suffix = "all" if scope == "all" else month_start.strftime("%Y-%m")
         return _json_response(
-            f"expenses-{month_start.strftime('%Y-%m')}.json", payload
+            f"expenses-{suffix}.json", payload
         )
 
     @app.get("/export/statement/<int:statement_id>/transactions.csv")

@@ -124,6 +124,20 @@ Minimum Amount due : Rs. 370.00
 Card Number: 4315 XXXX XXXX 4019
 """
 
+# ICICI Sapphiro August 2026: EMI/PLCC mask appears before the real card number.
+ICICI_SAPPHIRO_MULTI_MASK = """
+ICICI Bank Credit Card Statement
+Payment Due Date : 05-09-2026
+Total Amount due : Rs. 16,436.84
+Minimum Amount due : Rs. 822.00
+
+SPENDS OVERVIEW
+3747XXXXXXXX3006
+31/07/2026 BBPS Payment Received 5000.00 Cr
+5241XXXXXXXX4007
+02/08/2026 Interest Amount Amortization 150.00
+"""
+
 SBICARD_TABLE = """
 SBI Card Statement
 Statement Date: 12 Jul 2026

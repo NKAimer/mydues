@@ -17,6 +17,7 @@ from ..models import ParsedStatement
 from ..text import (
     AMOUNT_RE,
     DATE_RE,
+    find_all_card_last4s,
     find_card_last4,
     find_card_tail,
     is_money_shaped_match,
@@ -471,6 +472,7 @@ class StatementParser:
             credit_limit=self._amount(values, "credit_limit"),
             available_credit=self._amount(values, "available_credit"),
             last4=find_card_last4(text),
+            all_last4s=find_all_card_last4s(text),
             card_tail=find_card_tail(text),
             issuer=self.issuer_key or issuers.detect(text),
             parser=self.key,

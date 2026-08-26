@@ -90,6 +90,43 @@ def test_store_does_not_guess_when_partial_tail_matches_two_cards(conn):
     assert card_id is None
 
 
+def test_store_resolves_alternate_last4_when_primary_is_wrong(conn):
+    card = Card(issuer="icici", label="ICICI Sapphiro", last4="4007")
+    card.id = db.add_card(conn, card)
+
+    statement = ParsedStatement(
+        total_due=16436.84,
+        min_due=822.0,
+        due_date=date(2026, 9, 5),
+        issuer="icici",
+        parser="icici",
+        last4="3006",
+        all_last4s=["3006", "4007"],
+    )
+    status, detail, card_id = ingest.store(conn, statement, source_ref="msg-sapphiro")
+
+    assert status == ingest.STATUS_PARSED
+    assert card_id == card.id
+    assert "4007" in detail or "Sapphiro" in detail
+
+
+def test_store_stays_unparsed_when_multiple_candidates_match(conn):
+    db.add_card(conn, Card(issuer="icici", label="A ••3006", last4="3006"))
+    db.add_card(conn, Card(issuer="icici", label="B ••4007", last4="4007"))
+
+    statement = ParsedStatement(
+        total_due=16436.84,
+        issuer="icici",
+        parser="icici",
+        last4="9999",
+        all_last4s=["3006", "4007"],
+    )
+    status, _, card_id = ingest.store(conn, statement, source_ref="msg-ambig-icici")
+
+    assert status == ingest.STATUS_UNPARSED
+    assert card_id is None
+
+
 def test_reingesting_the_same_statement_does_not_duplicate(conn):
     db.add_card(conn, Card(issuer="hdfc", label="My Infinia", last4="8765"))
     ingest.store(conn, STATEMENT, source_ref="msg-1")

@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS ingest_log (
 CREATE TABLE IF NOT EXISTS expenses (
     id INTEGER PRIMARY KEY,
     spent_on TEXT NOT NULL,
+    spent_at TEXT,
     amount REAL NOT NULL,
     description TEXT NOT NULL,
     category TEXT,
@@ -136,6 +137,48 @@ CREATE TABLE IF NOT EXISTS category_budgets (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS monthly_income (
+    month TEXT PRIMARY KEY,
+    amount REAL NOT NULL,
+    credited_on TEXT,
+    note TEXT,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recurring_expenses (
+    id INTEGER PRIMARY KEY,
+    label TEXT NOT NULL,
+    amount REAL NOT NULL,
+    day_of_month INTEGER,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS planned_expenses (
+    id INTEGER PRIMARY KEY,
+    month TEXT NOT NULL,
+    label TEXT NOT NULL,
+    amount REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS savings_goals (
+    id INTEGER PRIMARY KEY,
+    label TEXT NOT NULL,
+    target_amount REAL NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS recurring_paid (
+    recurring_id INTEGER NOT NULL,
+    month TEXT NOT NULL,
+    paid_at TEXT NOT NULL,
+    PRIMARY KEY (recurring_id, month),
+    FOREIGN KEY (recurring_id) REFERENCES recurring_expenses(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS app_meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -155,6 +198,7 @@ ADDED_COLUMNS = {
     "expenses": {
         "category_source": "TEXT",
         "charge_kind": "TEXT",
+        "spent_at": "TEXT",
     },
     "transactions": {
         "charge_kind": "TEXT",
@@ -928,6 +972,7 @@ def _expense_from_row(row: sqlite3.Row) -> Expense:
         source=row["source"],
         source_ref=row["source_ref"],
         note=row["note"],
+        spent_at=_as_datetime(row["spent_at"]) if "spent_at" in keys else None,
         created_at=_as_datetime(row["created_at"]),
     )
 
@@ -939,12 +984,13 @@ def add_expense(conn: sqlite3.Connection, expense: Expense) -> int | None:
         cursor = conn.execute(
             """
             INSERT INTO expenses (
-                spent_on, amount, description, category, category_source,
+                spent_on, spent_at, amount, description, category, category_source,
                 charge_kind, source, source_ref, note, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 _iso(expense.spent_on),
+                _iso(expense.spent_at),
                 expense.amount,
                 expense.description.strip(),
                 expense.category,
@@ -994,7 +1040,10 @@ def list_expenses(
         f"""
         SELECT * FROM expenses
         WHERE {' AND '.join(clauses)}
-        ORDER BY spent_on DESC, id DESC
+        ORDER BY spent_on DESC,
+                 CASE WHEN spent_at IS NULL THEN 1 ELSE 0 END,
+                 spent_at DESC,
+                 id DESC
         """,
         params,
     ).fetchall()
@@ -1016,29 +1065,51 @@ def update_expense(
     category: str | None,
     category_source: str | None = None,
     note: str | None = None,
+    spent_at: datetime | None | object = ...,
     charge_kind: str | None | object = ...,
 ) -> bool:
     """Update editable fields; leaves source / source_ref alone. True if a row changed.
 
     ``charge_kind`` is ignored for expenses (statement transactions only).
+    Pass ``spent_at=...`` (Ellipsis) to leave the timestamp unchanged.
     """
-    cursor = conn.execute(
-        """
-        UPDATE expenses
-        SET spent_on = ?, amount = ?, description = ?, category = ?,
-            category_source = ?, note = ?, charge_kind = NULL
-        WHERE id = ?
-        """,
-        (
-            _iso(spent_on),
-            amount,
-            description.strip(),
-            category,
-            category_source,
-            note,
-            expense_id,
-        ),
-    )
+    if spent_at is ...:
+        cursor = conn.execute(
+            """
+            UPDATE expenses
+            SET spent_on = ?, amount = ?, description = ?, category = ?,
+                category_source = ?, note = ?, charge_kind = NULL
+            WHERE id = ?
+            """,
+            (
+                _iso(spent_on),
+                amount,
+                description.strip(),
+                category,
+                category_source,
+                note,
+                expense_id,
+            ),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            UPDATE expenses
+            SET spent_on = ?, spent_at = ?, amount = ?, description = ?, category = ?,
+                category_source = ?, note = ?, charge_kind = NULL
+            WHERE id = ?
+            """,
+            (
+                _iso(spent_on),
+                _iso(spent_at) if isinstance(spent_at, datetime) else None,
+                amount,
+                description.strip(),
+                category,
+                category_source,
+                note,
+                expense_id,
+            ),
+        )
     conn.commit()
     return cursor.rowcount > 0
 
@@ -1274,6 +1345,260 @@ def budget_status_for_month(
         )
     rows.sort(key=lambda r: (-r["spent"], r["category"].lower()))
     return rows
+
+
+def get_monthly_income(conn: sqlite3.Connection, month: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT month, amount, credited_on, note, updated_at FROM monthly_income WHERE month = ?",
+        (month,),
+    ).fetchone()
+
+
+def upsert_monthly_income(
+    conn: sqlite3.Connection,
+    *,
+    month: str,
+    amount: float,
+    credited_on: date | None = None,
+    note: str | None = None,
+) -> bool:
+    month = (month or "").strip()
+    if not month or amount is None or amount < 0:
+        return False
+    conn.execute(
+        """
+        INSERT INTO monthly_income (month, amount, credited_on, note, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT (month) DO UPDATE SET
+            amount = excluded.amount,
+            credited_on = excluded.credited_on,
+            note = excluded.note,
+            updated_at = excluded.updated_at
+        """,
+        (
+            month,
+            float(amount),
+            _iso(credited_on) if credited_on else None,
+            (note or "").strip() or None,
+            datetime.now().isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+    return True
+
+
+def copy_monthly_income(conn: sqlite3.Connection, *, from_month: str, to_month: str) -> bool:
+    """Copy salary amount (and note) from one plan month to another."""
+    import calendar as _calendar
+
+    src = get_monthly_income(conn, from_month)
+    if not src:
+        return False
+    year, month = (int(x) for x in to_month.split("-", 1))
+    if month == 1:
+        credited = date(year - 1, 12, 31)
+    else:
+        credited = date(year, month - 1, _calendar.monthrange(year, month - 1)[1])
+    return upsert_monthly_income(
+        conn,
+        month=to_month,
+        amount=float(src["amount"]),
+        credited_on=credited,
+        note=src["note"],
+    )
+
+
+def list_recurring_expenses(
+    conn: sqlite3.Connection, *, active_only: bool = False
+) -> list[sqlite3.Row]:
+    sql = (
+        "SELECT id, label, amount, day_of_month, active, created_at, updated_at "
+        "FROM recurring_expenses"
+    )
+    if active_only:
+        sql += " WHERE active = 1"
+    sql += " ORDER BY COALESCE(day_of_month, 99), label COLLATE NOCASE"
+    return conn.execute(sql).fetchall()
+
+
+def add_recurring_expense(
+    conn: sqlite3.Connection,
+    *,
+    label: str,
+    amount: float,
+    day_of_month: int | None = None,
+    active: bool = True,
+) -> int | None:
+    label = (label or "").strip()
+    if not label or amount is None or amount < 0:
+        return None
+    if day_of_month is not None and not (1 <= int(day_of_month) <= 31):
+        day_of_month = None
+    now = datetime.now().isoformat(timespec="seconds")
+    cursor = conn.execute(
+        """
+        INSERT INTO recurring_expenses
+            (label, amount, day_of_month, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (label, float(amount), day_of_month, 1 if active else 0, now, now),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def update_recurring_expense(
+    conn: sqlite3.Connection,
+    recurring_id: int,
+    *,
+    label: str | None = None,
+    amount: float | None = None,
+    day_of_month: int | None = ...,
+    active: bool | None = None,
+) -> bool:
+    row = conn.execute(
+        "SELECT id, label, amount, day_of_month, active FROM recurring_expenses WHERE id = ?",
+        (recurring_id,),
+    ).fetchone()
+    if not row:
+        return False
+    new_label = (label if label is not None else row["label"]).strip()
+    new_amount = float(amount) if amount is not None else float(row["amount"])
+    if not new_label or new_amount < 0:
+        return False
+    if day_of_month is ...:
+        new_day = row["day_of_month"]
+    elif day_of_month is None or day_of_month == "":
+        new_day = None
+    else:
+        new_day = int(day_of_month)
+        if not (1 <= new_day <= 31):
+            new_day = None
+    new_active = row["active"] if active is None else (1 if active else 0)
+    conn.execute(
+        """
+        UPDATE recurring_expenses
+        SET label = ?, amount = ?, day_of_month = ?, active = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            new_label,
+            new_amount,
+            new_day,
+            new_active,
+            datetime.now().isoformat(timespec="seconds"),
+            recurring_id,
+        ),
+    )
+    conn.commit()
+    return True
+
+
+def delete_recurring_expense(conn: sqlite3.Connection, recurring_id: int) -> bool:
+    cursor = conn.execute(
+        "DELETE FROM recurring_expenses WHERE id = ?", (recurring_id,)
+    )
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def paid_recurring_ids(conn: sqlite3.Connection, month: str) -> set[int]:
+    rows = conn.execute(
+        "SELECT recurring_id FROM recurring_paid WHERE month = ?", (month,)
+    ).fetchall()
+    return {int(r["recurring_id"]) for r in rows}
+
+
+def set_recurring_paid(
+    conn: sqlite3.Connection, recurring_id: int, month: str, *, paid: bool
+) -> bool:
+    exists = conn.execute(
+        "SELECT 1 FROM recurring_expenses WHERE id = ?", (recurring_id,)
+    ).fetchone()
+    if not exists or not (month or "").strip():
+        return False
+    if paid:
+        conn.execute(
+            """
+            INSERT INTO recurring_paid (recurring_id, month, paid_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT (recurring_id, month) DO UPDATE SET paid_at = excluded.paid_at
+            """,
+            (recurring_id, month, datetime.now().isoformat(timespec="seconds")),
+        )
+    else:
+        conn.execute(
+            "DELETE FROM recurring_paid WHERE recurring_id = ? AND month = ?",
+            (recurring_id, month),
+        )
+    conn.commit()
+    return True
+
+
+def list_planned_expenses(conn: sqlite3.Connection, month: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        """
+        SELECT id, month, label, amount, created_at FROM planned_expenses
+        WHERE month = ?
+        ORDER BY id
+        """,
+        (month,),
+    ).fetchall()
+
+
+def add_planned_expense(
+    conn: sqlite3.Connection, *, month: str, label: str, amount: float
+) -> int | None:
+    month = (month or "").strip()
+    label = (label or "").strip()
+    if not month or not label or amount is None or amount < 0:
+        return None
+    cursor = conn.execute(
+        """
+        INSERT INTO planned_expenses (month, label, amount, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (month, label, float(amount), datetime.now().isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def delete_planned_expense(conn: sqlite3.Connection, planned_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM planned_expenses WHERE id = ?", (planned_id,))
+    conn.commit()
+    return cursor.rowcount > 0
+
+
+def list_savings_goals(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT id, label, target_amount, created_at, updated_at FROM savings_goals "
+        "ORDER BY id"
+    ).fetchall()
+
+
+def add_savings_goal(
+    conn: sqlite3.Connection, *, label: str, target_amount: float
+) -> int | None:
+    label = (label or "").strip()
+    if not label or target_amount is None or target_amount <= 0:
+        return None
+    now = datetime.now().isoformat(timespec="seconds")
+    cursor = conn.execute(
+        """
+        INSERT INTO savings_goals (label, target_amount, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (label, float(target_amount), now, now),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def delete_savings_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
+    cursor = conn.execute("DELETE FROM savings_goals WHERE id = ?", (goal_id,))
+    conn.commit()
+    return cursor.rowcount > 0
 
 
 def card_spend_total(conn: sqlite3.Connection, *, start: date, end: date) -> float:
