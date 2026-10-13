@@ -194,6 +194,9 @@ Separate from statement PDFs so dues Fetch never double-counts alert mail.
   row) and **Refresh descriptions from Gmail**
 - Add / edit / delete expenses by hand; optional spend **time** (`spent_at`) on
   alerts and forms; **Show email** for Gmail-sourced rows
+- Merchant extraction anchors to transaction lines (first valid match) and
+  rejects long prose (> 6 words) so bank email footer disclaimers never become
+  merchants
 - Scope **This month** | **All months** (`scope=all`) for search and filters
   across the ledger; CSV / JSON exports use the same scope and filters
 - Totals and category breakdown for the selected calendar month (`spent_on`) —
@@ -325,6 +328,15 @@ To add an issuer, add an entry to `mydues/issuers.py` with its sending domains
 and a text marker, then a small class in `banks.py` if its wording is unusual.
 Unknown issuers fall through to the generic parser, which handles most formats.
 
+### Non-card statement gate
+
+Bank senders are broad on purpose so card statements are not missed.
+`mydues/statement_gate.py` acts as a precision filter before attachments are
+unlocked or parsed: it automatically rejects non-card documents such as Demat /
+NSDL depository statements, mutual funds, loan accounts / EMI statements, home
+loan interest certificates, savings account e-statements, and credit-card
+cancellation letters.
+
 ## How locked statements are opened
 
 Issuers state the password rule in the covering mail, so `mydues/passwords.py`
@@ -373,7 +385,7 @@ recorded, which is what older log rows look like.
 ```bash
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest
-# or: uv run pytest
+# or: uv run --extra dev pytest
 ```
 
 The suite covers the parsers against realistic statement layouts, real encrypted
