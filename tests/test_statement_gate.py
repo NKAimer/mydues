@@ -174,3 +174,21 @@ def test_hdfc_swiggy_prefers_card_no_over_alternate_account():
     assert result is not None
     assert result.last4 == "6527"
     assert result.total_due == pytest.approx(4551.0)
+
+def test_non_card_emails_and_cancellations_are_skipped():
+    # SBI loan, savings, interest certificates
+    assert not is_credit_card_mail(subject="Quarterly Loan Account (EMI) Statement")
+    assert not is_credit_card_mail(subject="E-account statement for your SBI account(s).")
+    assert not is_credit_card_mail(subject="PROVISIONAL HOME LOAN INTEREST CERTIFICATE: FINANCIAL YEAR 2025-2026")
+
+    # NSDL fund receipts / depository
+    assert not is_credit_card_mail(subject="NSDL e-Services statement")
+
+    # Kotak savings account
+    assert not is_credit_card_mail(subject="Your February 2026 statement for Kotak A/c X1084")
+
+    # Axis cancellation letter
+    assert not is_credit_card_mail(
+        subject="Important Communication : Cancellation of your Axis Bank Credit Card",
+        filename="AXIS BANK ACCOUNT CANCELLATION AXIS.pdf",
+    )

@@ -12,3 +12,14 @@ token.json
 data/*
 !data/categories.json
 .env
+# IDE & agent directories
+.agents/
+.cursor/
+.vscode/
+.idea/
+
+# Local databases & logs
+*.sqlite
+*.sqlite3
+*.db
+*.log

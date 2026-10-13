@@ -14,13 +14,22 @@ _HARD_NON_CARD_RE = re.compile(
     r"(?i)\b(?:"
     r"demat(?:\s+account)?"
     r"|depository\s+participant"
+    r"|national\s+securities\s+depository"
+    r"|nsdl"
     r"|mutual\s+fund\s+statement"
     r"|consolidated\s+account\s+statement"
     r"|loan\s+account\s+statement"
-    r"|home\s+loan\s+statement"
+    r"|quarterly\s+loan\s+account"
+    r"|home\s+loan\s+(?:statement|interest\s+certificate)"
+    r"|provisional\s+home\s+loan"
+    r"|home\s+loan\s+interest\s+certificate"
+    r"|interest\s+certificate"
     r"|statement of transactions in savings"
+    r"|e-?account\s+statement"
     r"|savings\s+a/?c\b"
     r"|current\s+account\s+statement"
+    r"|account\s+cancellation"
+    r"|cancellation\s+of\s+(?:your\s+)?credit\s+card"
     r")\b"
 )
 
@@ -38,7 +47,7 @@ _SOFT_TITLE_WINDOW = 900
 # Filenames that arrive with statement mail but are not the bill itself.
 _NON_STATEMENT_FILE_RE = re.compile(
     r"(?i)(?:most\s+important\s+terms|terms\s*(?:&|and)\s*conditions|key\s+fact|"
-    r"mitc|schedule\s+of\s+charges|card\s+agreement|customer\s+agreement)"
+    r"mitc|schedule\s+of\s+charges|card\s+agreement|customer\s+agreement|cancellation)"
 )
 
 # At least one of these appears on every issuer layout we support.
@@ -61,12 +70,21 @@ GMAIL_SUBJECT_EXCLUSIONS = (
     "demat",
     "mutual fund",
     "consolidated account statement",
+    "loan account statement",
+    "quarterly loan account",
+    "e-account statement",
+    "interest certificate",
+    "national securities depository",
+    "nsdl",
+    "cancellation of your",
+    "statement for kotak a/c",
 )
 
 # Savings / current-account e-statements share bank senders with card mail.
 _SAVINGS_MAIL_RE = re.compile(
     r"(?i)(?:bank statement from|statement of transactions in savings"
-    r"|savings\s+a/?c\b|for your\s+(?:savings|current)\s+account)"
+    r"|savings\s+a/?c\b|for your\s+(?:savings|current)\s+account"
+    r"|statement\s+for\s+kotak\s+a/?c)"
 )
 
 
