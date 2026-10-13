@@ -356,6 +356,10 @@ def _is_bad_merchant(text: str) -> bool:
         value.strip(),
     ):
         return True
+    # Reject long prose — real merchant names are short; bank disclaimers are not.
+    # More than 6 words almost certainly means we matched a boilerplate sentence.
+    if len(value.split()) > 6:
+        return True
     return False
 
 
@@ -431,21 +435,20 @@ def _extract_merchant(
 ) -> str | None:
     """Best non-boilerplate merchant string found in subject+body.
 
-    Tries editable/default cues first, then built-in patterns; among hits from
-    the same cue/pattern, prefers the longest cleaned merchant.
+    Tries editable/default cues first, then built-in patterns. Within each
+    pattern the first valid match is returned; this keeps the extraction
+    anchored to the transaction line near the top of the body rather than
+    being tricked by a longer string from a footer disclaimer.
     """
     active = list(cues) if cues is not None else list(DEFAULT_PAYEE_CUES)
     from_cues = _extract_from_cues(blob, active)
     if from_cues:
         return from_cues
     for pattern in _MERCHANT_PATTERNS:
-        found: list[str] = []
         for match in pattern.finditer(blob):
             merchant = _clean_merchant(match.group(1))
             if merchant:
-                found.append(merchant)
-        if found:
-            return max(found, key=len)
+                return merchant
     return _vpa_merchant(blob)
 
 
